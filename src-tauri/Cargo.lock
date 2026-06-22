@@ -142,6 +142,7 @@ dependencies = [
  "async-trait",
  "bigdecimal",
  "chrono",
+ "dirs",
  "futures",
  "keyring",
  "mongodb",

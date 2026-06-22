@@ -3,8 +3,9 @@ import {
   api, ColumnInfo, Filter, KeyDetail, KeyEdit, PagedData, RowInsert, Sort, SortDir,
 } from "./api";
 import { OpenTab, useStore } from "./store";
-import { uiConfirm } from "./ui";
+import { toast, uiConfirm } from "./ui";
 import ExportDialog from "./ExportDialog";
+import { AlterOp } from "./api";
 
 const PAGE_SIZE = 100;
 const DEFAULT_COL_W = 160;
@@ -949,8 +950,14 @@ function NavBtn({ label, onClick, disabled, title }: {
 
 // ---- 結構分頁：欄位定義 ----
 function StructurePane({ tab }: { tab: OpenTab }) {
+  const kind = useStore((s) => s.connections.find((c) => c.id === tab.connId)?.kind);
+  const isSql = kind === "mysql" || kind === "postgres" || kind === "sqlite";
   const [cols, setCols] = useState<ColumnInfo[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [rename, setRename] = useState<{ col: string; to: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -962,13 +969,44 @@ function StructurePane({ tab }: { tab: OpenTab }) {
     return () => {
       cancelled = true;
     };
-  }, [tab.connId, tab.database, tab.table]);
+  }, [tab.connId, tab.database, tab.table, nonce]);
+
+  const doAlter = async (op: AlterOp, okMsg: string) => {
+    setBusy(true);
+    try {
+      await api.alterTable(tab.connId, tab.database, tab.table, op);
+      toast.success(okMsg);
+      setAdding(false);
+      setRename(null);
+      setNonce((n) => n + 1);
+    } catch (e: any) {
+      toast.error(e?.message ?? "結構變更失敗");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dropCol = async (name: string) => {
+    if (!(await uiConfirm(`刪除欄位「${name}」？此動作無法復原。`, { title: "刪除欄位", danger: true, confirmText: "刪除" }))) return;
+    doAlter({ op: "drop_column", name }, "欄位已刪除");
+  };
 
   if (err) return <div className="p-3 text-red-400 text-sm mono">{err}</div>;
   if (!cols) return <div className="p-3 text-white/40 text-sm">讀取中…</div>;
 
   return (
     <div className="flex-1 overflow-auto">
+      {isSql && (
+        <div className="flex items-center gap-1 px-2 py-1 bg-[#10161e] border-b border-white/10 text-xs">
+          <button type="button" onClick={() => setAdding((s) => !s)} disabled={busy}
+            className="px-2 py-1 rounded hover:bg-white/10 text-white/60 disabled:opacity-40">
+            ＋ 新增欄位
+          </button>
+          {busy && <span className="text-white/40">處理中…</span>}
+        </div>
+      )}
+      {adding && isSql && <AddColumnForm busy={busy} onCancel={() => setAdding(false)}
+        onSubmit={(op) => doAlter(op, "欄位已新增")} />}
       <table className="text-sm border-collapse w-full">
         <thead className="sticky top-0 bg-[#1a212b]">
           <tr>
@@ -977,12 +1015,27 @@ function StructurePane({ tab }: { tab: OpenTab }) {
                 {h}
               </th>
             ))}
+            {isSql && <th className="w-20 border-b border-white/10" />}
           </tr>
         </thead>
         <tbody>
           {cols.map((c) => (
-            <tr key={c.name} className="hover:bg-white/5">
-              <td className="px-3 py-1 border-b border-white/5 font-medium">{c.name}</td>
+            <tr key={c.name} className="hover:bg-white/5 group">
+              <td className="px-3 py-1 border-b border-white/5 font-medium">
+                {rename?.col === c.name ? (
+                  <input autoFocus value={rename.to}
+                    onChange={(e) => setRename({ col: c.name, to: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && rename.to && rename.to !== c.name)
+                        doAlter({ op: "rename_column", old: c.name, new: rename.to }, "欄位已改名");
+                      else if (e.key === "Escape") setRename(null);
+                    }}
+                    onBlur={() => setRename(null)}
+                    className="bg-black/50 border border-blue-500 rounded px-1 py-0.5 outline-none" />
+                ) : (
+                  c.name
+                )}
+              </td>
               <td className="px-3 py-1 border-b border-white/5 mono text-white/70">{c.data_type}</td>
               <td className="px-3 py-1 border-b border-white/5 text-white/60">{c.nullable ? "YES" : "NO"}</td>
               <td className="px-3 py-1 border-b border-white/5">
@@ -994,10 +1047,53 @@ function StructurePane({ tab }: { tab: OpenTab }) {
                 {c.default ?? <span className="text-white/25 italic">—</span>}
               </td>
               <td className="px-3 py-1 border-b border-white/5 text-white/50 text-xs">{c.extra}</td>
+              {isSql && (
+                <td className="px-2 py-1 border-b border-white/5 text-right whitespace-nowrap">
+                  <button type="button" title="改名" disabled={busy}
+                    onClick={() => setRename({ col: c.name, to: c.name })}
+                    className="px-1 text-white/20 group-hover:text-white/70 hover:bg-white/15 rounded disabled:opacity-40">✎</button>
+                  <button type="button" title="刪除欄位" disabled={busy}
+                    onClick={() => dropCol(c.name)}
+                    className="px-1 text-white/20 group-hover:text-red-400 hover:bg-red-500/20 rounded disabled:opacity-40">−</button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function AddColumnForm({ onSubmit, onCancel, busy }: {
+  onSubmit: (op: AlterOp) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [dataType, setDataType] = useState("");
+  const [nullable, setNullable] = useState(true);
+  const [def, setDef] = useState("");
+  const ic = "bg-black/30 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-blue-500";
+  const submit = () => {
+    if (!name.trim() || !dataType.trim()) { toast.error("請填欄位名稱與型別"); return; }
+    onSubmit({ op: "add_column", name: name.trim(), data_type: dataType.trim(), nullable, default: def.trim() || null });
+  };
+  return (
+    <div className="flex flex-wrap items-end gap-2 px-3 py-2 bg-[#0d131a] border-b border-white/10 text-xs">
+      <label className="block"><span className="text-white/50 block mb-0.5">欄位名稱</span>
+        <input className={ic} value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <label className="block"><span className="text-white/50 block mb-0.5">型別</span>
+        <input className={ic} value={dataType} onChange={(e) => setDataType(e.target.value)} placeholder="如 VARCHAR(50) / INT" /></label>
+      <label className="block"><span className="text-white/50 block mb-0.5">預設值（選填）</span>
+        <input className={ic} value={def} onChange={(e) => setDef(e.target.value)} placeholder="如 0 / 'x' / CURRENT_TIMESTAMP" /></label>
+      <label className="flex items-center gap-1 pb-1.5 select-none">
+        <input type="checkbox" checked={nullable} onChange={(e) => setNullable(e.target.checked)} /> 可空
+      </label>
+      <button type="button" onClick={submit} disabled={busy}
+        className="px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 disabled:opacity-50">新增</button>
+      <button type="button" onClick={onCancel}
+        className="px-3 py-1.5 rounded border border-white/15 hover:bg-white/5">取消</button>
     </div>
   );
 }

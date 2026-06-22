@@ -32,6 +32,8 @@ chrono = { version = "0.4", features = ["serde"] }
 bigdecimal = "0.4"
 # SSH Tunnel：純 Rust。用 ring 當 crypto backend（避免 aws-lc-sys 需要 NASM 才能在 Windows 編譯）。
 russh = { version = "0.61", default-features = false, features = ["ring", "flate2", "rsa"] }
+# 取 OS 設定目錄（SSH known-hosts 指紋存放位置）。
+dirs = "6"
 
 # OS keychain：依平台選用原生後端，避免在 Windows 上編譯 secret-service。
 [target.'cfg(windows)'.dependencies]

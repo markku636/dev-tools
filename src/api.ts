@@ -107,6 +107,18 @@ export interface ExportResult {
   format: string;
 }
 
+// DDL 結構編輯（與後端 serde tag="op" 對齊）
+export type AlterOp =
+  | { op: "add_column"; name: string; data_type: string; nullable: boolean; default?: string | null }
+  | { op: "drop_column"; name: string }
+  | { op: "rename_column"; old: string; new: string };
+
+// ER 圖模型
+export interface ErColumn { name: string; data_type: string; pk: boolean; fk: boolean }
+export interface ErTable { name: string; columns: ErColumn[] }
+export interface ErRelation { from_table: string; from_column: string; to_table: string; to_column: string }
+export interface ErModel { tables: ErTable[]; relations: ErRelation[] }
+
 export interface RowInsert {
   columns: string[];
   values: (string | null)[];
@@ -229,6 +241,12 @@ export const api = {
     invoke<number>("key_edit", { id, database, key, edit }),
   exportTable: (id: string, database: string, table: string, query: DataQuery, options: ExportOptions, outPath: string) =>
     invoke<ExportResult>("export_table", { id, database, table, query, options, outPath }),
+  explainQuery: (id: string, sql: string) =>
+    invoke<QueryResult>("explain_query", { id, sql }),
+  alterTable: (id: string, database: string, table: string, op: AlterOp) =>
+    invoke<void>("alter_table", { id, database, table, op }),
+  erModel: (id: string, database: string) =>
+    invoke<ErModel>("er_model", { id, database }),
   backupDetectCli: (kind: DbKind) =>
     invoke<boolean>("backup_detect_cli", { kind }),
   backupRun: (config: ConnectionConfig, database: string, outPath: string) =>

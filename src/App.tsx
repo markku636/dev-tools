@@ -4,14 +4,17 @@ import { useStore } from "./store";
 import ConnectionDialog from "./ConnectionDialog";
 import TableView from "./TableView";
 import BackupDialog from "./BackupDialog";
+import ErDiagram from "./ErDiagram";
 import { toast, uiConfirm, UiHost } from "./ui";
 
 export default function App() {
   // null = 關閉；{ initial } = 開啟（initial 為 null 表新增、為連線表示編輯）
   const [dialog, setDialog] = useState<{ initial: ConnectionConfig | null } | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
+  const [erOpen, setErOpen] = useState(false);
   const { connections, connectedIds, activeId } = useStore();
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
+  const canEr = !!activeConn && connectedIds.has(activeConn.id);
 
   // 啟動時載入已存連線清單（僅清單，不自動連線；密碼留在 keychain）。
   useEffect(() => {
@@ -31,6 +34,8 @@ export default function App() {
         onNewConnection={() => setDialog({ initial: null })}
         onBackup={() => activeConn && setBackupOpen(true)}
         canBackup={!!activeConn}
+        onEr={() => canEr && setErOpen(true)}
+        canEr={canEr}
       />
       <div className="flex-1 flex min-h-0">
         <Sidebar onEdit={(c) => setDialog({ initial: c })} />
@@ -61,6 +66,9 @@ export default function App() {
           onClose={() => setBackupOpen(false)}
         />
       )}
+      {erOpen && activeConn && canEr && (
+        <ErDiagram connId={activeConn.id} onClose={() => setErOpen(false)} />
+      )}
       <UiHost />
     </div>
   );
@@ -82,15 +90,16 @@ export default function App() {
 }
 
 // ---- 上方大圖示工具列（Navicat 風格識別特徵）----
-function Toolbar({ onNewConnection, onBackup, canBackup }: {
+function Toolbar({ onNewConnection, onBackup, canBackup, onEr, canEr }: {
   onNewConnection: () => void;
   onBackup: () => void;
   canBackup: boolean;
+  onEr: () => void;
+  canEr: boolean;
 }) {
   const tools = [
     { icon: "🔌", label: "連線", onClick: onNewConnection, disabled: false },
-    { icon: "▦", label: "表", disabled: true, onClick: () => {} },
-    { icon: "⌗", label: "查詢", disabled: true, onClick: () => {} },
+    { icon: "🗺", label: "ER 圖", onClick: onEr, disabled: !canEr },
     { icon: "💾", label: "備份", onClick: onBackup, disabled: !canBackup },
   ];
   return (
@@ -98,6 +107,7 @@ function Toolbar({ onNewConnection, onBackup, canBackup }: {
       <div className="font-semibold text-white/90 mr-4 pl-1">at-kit</div>
       {tools.map((t) => (
         <button
+          type="button"
           key={t.label}
           onClick={t.onClick}
           disabled={t.disabled}
@@ -406,6 +416,17 @@ function QueryPane() {
     }
   };
 
+  const analyze = async () => {
+    if (!activeId) return;
+    setErr(null);
+    try {
+      setResult(await api.explainQuery(activeId, sql));
+    } catch (e: any) {
+      setErr(e?.message ?? "分析失敗");
+      setResult(null);
+    }
+  };
+
   if (!activeId) {
     return (
       <div className="flex-1 flex items-center justify-center text-white/25 text-sm">
@@ -419,10 +440,17 @@ function QueryPane() {
       <div className="border-b border-white/10">
         <div className="flex items-center justify-between px-3 py-1.5 bg-[#161c25]">
           <span className="text-xs text-white/40">查詢</span>
-          <button onClick={run}
-            className="text-xs px-2 py-1 rounded bg-green-600/80 hover:bg-green-600">
-            ▶ 執行 (F6)
-          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={analyze}
+              title="EXPLAIN：查看查詢執行計畫"
+              className="text-xs px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/70">
+              🔬 分析
+            </button>
+            <button type="button" onClick={run}
+              className="text-xs px-2 py-1 rounded bg-green-600/80 hover:bg-green-600">
+              ▶ 執行 (F6)
+            </button>
+          </div>
         </div>
         <textarea
           className="w-full h-40 bg-[#0f1419] p-3 outline-none mono text-sm resize-none"

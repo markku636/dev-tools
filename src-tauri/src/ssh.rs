@@ -20,17 +20,63 @@ use tokio::task::JoinHandle;
 use crate::db::{ConnectionConfig, DbKind, SshAuthMethod};
 use crate::error::{AppError, AppResult};
 
-/// 不驗 host key 的 client handler（dev 工具）。
-struct TunnelHandler;
+/// 以 TOFU（trust on first use）驗證 host key 的 client handler。
+/// 第一次連線記住指紋；之後比對，不符則拒絕（可能 MITM）。
+struct TunnelHandler {
+    host_id: String,
+}
 
 impl client::Handler for TunnelHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let fp = server_public_key.fingerprint(Default::default()).to_string();
+        let mut known = load_known_hosts();
+        match known.get(&self.host_id) {
+            Some(stored) if stored == &fp => Ok(true),
+            Some(_) => {
+                eprintln!(
+                    "[ssh] host key 與已記錄指紋不符，拒絕連線（可能遭中間人攻擊）：{}",
+                    self.host_id
+                );
+                Ok(false)
+            }
+            None => {
+                // TOFU：第一次連線，記住此指紋。
+                known.insert(self.host_id.clone(), fp);
+                save_known_hosts(&known);
+                Ok(true)
+            }
+        }
+    }
+}
+
+fn known_hosts_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("dev.atkit.app").join("ssh_known_hosts.json"))
+}
+
+fn load_known_hosts() -> std::collections::HashMap<String, String> {
+    let Some(p) = known_hosts_path() else {
+        return Default::default();
+    };
+    match std::fs::read(&p) {
+        Ok(b) => serde_json::from_slice(&b).unwrap_or_default(),
+        Err(_) => Default::default(),
+    }
+}
+
+fn save_known_hosts(map: &std::collections::HashMap<String, String>) {
+    let Some(p) = known_hosts_path() else {
+        return;
+    };
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(b) = serde_json::to_vec_pretty(map) {
+        let _ = std::fs::write(&p, b);
     }
 }
 
@@ -68,7 +114,10 @@ pub async fn open_tunnel(cfg: &ConnectionConfig) -> AppResult<TunnelGuard> {
 
     // 1. 連到 SSH bastion。
     let config = Arc::new(client::Config::default());
-    let mut session = client::connect(config, (cfg.ssh_host.as_str(), ssh_port), TunnelHandler)
+    let handler = TunnelHandler {
+        host_id: format!("{}:{}", cfg.ssh_host, ssh_port),
+    };
+    let mut session = client::connect(config, (cfg.ssh_host.as_str(), ssh_port), handler)
         .await
         .map_err(|e| AppError::Ssh(format!("SSH 連線失敗：{e}")))?;
 

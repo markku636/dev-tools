@@ -3,9 +3,9 @@ use sqlx::{Column, Row, SqlitePool, TypeInfo, ValueRef};
 use std::time::Duration;
 
 use crate::db::{
-    filter_op_sql, op_needs_value, CellEdit, ColumnInfo, ConnectionConfig, DataQuery,
-    DatabaseDriver, Filter, PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, Sort,
-    SortDir, TableInfo,
+    filter_op_sql, op_needs_value, AlterOp, CellEdit, ColumnInfo, ConnectionConfig, DataQuery,
+    DatabaseDriver, ErColumn, ErModel, ErRelation, ErTable, Filter, PagedData, PoolStatus,
+    QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -290,6 +290,83 @@ impl DatabaseDriver for SqliteDriver {
             .await
             .map_err(|e| AppError::Query(e.to_string()))?;
         Ok(res.rows_affected())
+    }
+
+    async fn explain(&self, sql: &str) -> AppResult<QueryResult> {
+        let rows = sqlx::query(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(rows_to_result(&rows))
+    }
+
+    async fn alter_table(&self, _database: &str, table: &str, op: &AlterOp) -> AppResult<()> {
+        let q_tbl = quote_ident(table);
+        let ddl = match op {
+            AlterOp::AddColumn { name, data_type, nullable, default } => {
+                if data_type.trim().is_empty() {
+                    return Err(AppError::Query("請指定欄位型別".into()));
+                }
+                let nn = if *nullable { "" } else { " NOT NULL" };
+                let def = default.as_ref().map(|d| format!(" DEFAULT {d}")).unwrap_or_default();
+                format!("ALTER TABLE {q_tbl} ADD COLUMN {} {data_type}{nn}{def}", quote_ident(name))
+            }
+            AlterOp::DropColumn { name } => {
+                format!("ALTER TABLE {q_tbl} DROP COLUMN {}", quote_ident(name))
+            }
+            AlterOp::RenameColumn { old, new } => format!(
+                "ALTER TABLE {q_tbl} RENAME COLUMN {} TO {}",
+                quote_ident(old),
+                quote_ident(new)
+            ),
+        };
+        sqlx::query(&ddl)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn er_model(&self, database: &str) -> AppResult<ErModel> {
+        let tlist = self.list_tables(database).await?;
+        let mut relations = Vec::new();
+        let mut fk_cols: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+        for t in &tlist {
+            // PRAGMA foreign_key_list 欄位：id, seq, table, from, to, ...
+            let rows = sqlx::query(&format!("PRAGMA foreign_key_list({})", quote_ident(&t.name)))
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| AppError::Query(e.to_string()))?;
+            for r in &rows {
+                let to_table: String = r.try_get(2).unwrap_or_default();
+                let from_col: String = r.try_get(3).unwrap_or_default();
+                let to_col: String = r.try_get(4).unwrap_or_default();
+                if !to_table.is_empty() {
+                    fk_cols.insert((t.name.clone(), from_col.clone()));
+                    relations.push(ErRelation {
+                        from_table: t.name.clone(),
+                        from_column: from_col,
+                        to_table,
+                        to_column: to_col,
+                    });
+                }
+            }
+        }
+        let mut tables = Vec::new();
+        for t in &tlist {
+            let cols = self.table_columns(database, &t.name).await?;
+            let er_cols = cols
+                .into_iter()
+                .map(|c| ErColumn {
+                    pk: c.key == "PRI",
+                    fk: fk_cols.contains(&(t.name.clone(), c.name.clone())),
+                    name: c.name,
+                    data_type: c.data_type,
+                })
+                .collect();
+            tables.push(ErTable { name: t.name.clone(), columns: er_cols });
+        }
+        Ok(ErModel { tables, relations })
     }
 
     async fn close(&self) {

@@ -226,6 +226,83 @@ fn one_i64() -> i64 {
     1
 }
 
+/// DDL 結構編輯操作（關聯式專屬）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum AlterOp {
+    /// 新增欄位。
+    AddColumn {
+        name: String,
+        #[serde(default)]
+        data_type: String,
+        #[serde(default)]
+        nullable: bool,
+        #[serde(default)]
+        default: Option<String>,
+    },
+    /// 刪除欄位。
+    DropColumn { name: String },
+    /// 改欄位名稱。
+    RenameColumn { old: String, new: String },
+}
+
+/// ER 圖：欄位節點。
+#[derive(Debug, Clone, Serialize)]
+pub struct ErColumn {
+    pub name: String,
+    pub data_type: String,
+    pub pk: bool,
+    pub fk: bool,
+}
+
+/// ER 圖：表節點。
+#[derive(Debug, Clone, Serialize)]
+pub struct ErTable {
+    pub name: String,
+    pub columns: Vec<ErColumn>,
+}
+
+/// ER 圖：外鍵關係（from 表的欄位 → to 表的欄位）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ErRelation {
+    pub from_table: String,
+    pub from_column: String,
+    pub to_table: String,
+    pub to_column: String,
+}
+
+/// ER 圖模型。
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ErModel {
+    pub tables: Vec<ErTable>,
+    pub relations: Vec<ErRelation>,
+}
+
+/// 由 [from_table, from_col, to_table, to_col] 四欄的列建出關係清單與 FK 欄集合（各 SQL driver 共用）。
+pub(crate) fn collect_relations<R>(
+    rows: &[R],
+    get: impl Fn(&R, usize) -> Option<String>,
+) -> (Vec<ErRelation>, std::collections::HashSet<(String, String)>) {
+    let mut relations = Vec::new();
+    let mut fk_cols = std::collections::HashSet::new();
+    for r in rows {
+        let ft = get(r, 0).unwrap_or_default();
+        let fc = get(r, 1).unwrap_or_default();
+        let tt = get(r, 2).unwrap_or_default();
+        let tc = get(r, 3).unwrap_or_default();
+        if !ft.is_empty() && !tt.is_empty() {
+            fk_cols.insert((ft.clone(), fc.clone()));
+            relations.push(ErRelation {
+                from_table: ft,
+                from_column: fc,
+                to_table: tt,
+                to_column: tc,
+            });
+        }
+    }
+    (relations, fk_cols)
+}
+
 /// 排序方向。
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -336,6 +413,21 @@ pub trait DatabaseDriver: Send + Sync {
     /// 非鍵值型資料庫預設回 Unsupported。
     async fn key_edit(&self, _database: &str, _key: &str, _edit: &KeyEdit) -> AppResult<u64> {
         Err(AppError::Unsupported("此資料庫不支援鍵結構編輯".into()))
+    }
+
+    /// 查詢計畫分析（EXPLAIN）。非關聯式預設 Unsupported。
+    async fn explain(&self, _sql: &str) -> AppResult<QueryResult> {
+        Err(AppError::Unsupported("此資料庫不支援查詢計畫分析".into()))
+    }
+
+    /// 結構編輯（DDL：ALTER TABLE）。非關聯式預設 Unsupported。
+    async fn alter_table(&self, _database: &str, _table: &str, _op: &AlterOp) -> AppResult<()> {
+        Err(AppError::Unsupported("此資料庫不支援結構編輯".into()))
+    }
+
+    /// ER 圖模型（表 + 外鍵關係）。非關聯式預設 Unsupported。
+    async fn er_model(&self, _database: &str) -> AppResult<ErModel> {
+        Err(AppError::Unsupported("此資料庫不支援 ER 圖".into()))
     }
 
     /// 優雅關閉：drain 連線池。

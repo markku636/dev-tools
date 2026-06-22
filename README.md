@@ -29,8 +29,10 @@
 - [x] 多欄篩選 AND / OR 條件切換
 - [x] 資料匯出（CSV / TSV / JSON / SQL INSERT / Markdown，含標題 / 分隔字元 / NULL / BOM / 範圍選項）
 - [x] 操作體驗：原生檔案選擇器、編輯連線、Toast 通知、連線樹右鍵選單
-- [ ] Redis host key 驗證（TOFU）
-- [ ] ER 圖、查詢效能分析、結構編輯（DDL）
+- [x] SSH host key 驗證（TOFU：首次記憶指紋、之後比對）
+- [x] 查詢效能分析（EXPLAIN）
+- [x] 結構編輯（DDL：新增 / 刪除 / 改名欄位）
+- [x] ER 圖（表 + 外鍵關係，表卡可拖曳）
 
 ## 技術棧
 

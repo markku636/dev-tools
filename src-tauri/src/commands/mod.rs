@@ -5,8 +5,8 @@ use tauri::{AppHandle, State};
 
 use crate::backup::{self, BackupResult};
 use crate::db::{
-    CellEdit, ColumnInfo, ConnectionConfig, DataQuery, KeyDetail, KeyEdit, PagedData, PoolStatus,
-    QueryResult, RowDelete, RowInsert, TableInfo,
+    AlterOp, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, ErModel, KeyDetail, KeyEdit,
+    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::manager::ConnectionManager;
@@ -225,6 +225,37 @@ pub async fn backup_restore(
     let mut config = config;
     hydrate_secrets(&mut config);
     backup::restore(&config, &database, &in_path).await
+}
+
+// ---- 查詢效能分析 / 結構編輯 / ER 圖 ----
+
+#[tauri::command]
+pub async fn explain_query(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+) -> AppResult<QueryResult> {
+    state.manager.explain(&id, &sql).await
+}
+
+#[tauri::command]
+pub async fn alter_table(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    table: String,
+    op: AlterOp,
+) -> AppResult<()> {
+    state.manager.alter_table(&id, &database, &table, &op).await
+}
+
+#[tauri::command]
+pub async fn er_model(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+) -> AppResult<ErModel> {
+    state.manager.er_model(&id, &database).await
 }
 
 // ---- 資料匯出 ----

@@ -3,9 +3,9 @@ use sqlx::{Column, MySqlPool, Row, TypeInfo, ValueRef};
 use std::time::Duration;
 
 use crate::db::{
-    filter_op_sql, op_needs_value, CellEdit, ColumnInfo, ConnectionConfig, DataQuery,
-    DatabaseDriver, Filter, PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, Sort,
-    SortDir, TableInfo,
+    collect_relations, filter_op_sql, op_needs_value, AlterOp, CellEdit, ColumnInfo,
+    ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, PagedData,
+    PoolStatus, QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -327,6 +327,69 @@ impl DatabaseDriver for MysqlDriver {
             .await
             .map_err(|e| AppError::Query(e.to_string()))?;
         Ok(res.rows_affected())
+    }
+
+    async fn explain(&self, sql: &str) -> AppResult<QueryResult> {
+        let rows = sqlx::query(&format!("EXPLAIN {sql}"))
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(rows_to_result(&rows))
+    }
+
+    async fn alter_table(&self, database: &str, table: &str, op: &AlterOp) -> AppResult<()> {
+        let q_tbl = format!("{}.{}", quote_ident(database), quote_ident(table));
+        let ddl = match op {
+            AlterOp::AddColumn { name, data_type, nullable, default } => {
+                if data_type.trim().is_empty() {
+                    return Err(AppError::Query("請指定欄位型別".into()));
+                }
+                let nn = if *nullable { "" } else { " NOT NULL" };
+                let def = default.as_ref().map(|d| format!(" DEFAULT {d}")).unwrap_or_default();
+                format!("ALTER TABLE {q_tbl} ADD COLUMN {} {data_type}{nn}{def}", quote_ident(name))
+            }
+            AlterOp::DropColumn { name } => {
+                format!("ALTER TABLE {q_tbl} DROP COLUMN {}", quote_ident(name))
+            }
+            AlterOp::RenameColumn { old, new } => format!(
+                "ALTER TABLE {q_tbl} RENAME COLUMN {} TO {}",
+                quote_ident(old),
+                quote_ident(new)
+            ),
+        };
+        sqlx::query(&ddl)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn er_model(&self, database: &str) -> AppResult<ErModel> {
+        let fk_rows = sqlx::query(
+            "SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
+             FROM information_schema.KEY_COLUMN_USAGE \
+             WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        let (relations, fk_cols) = collect_relations(&fk_rows, |r, i| str_col(r, i));
+        let mut tables = Vec::new();
+        for t in self.list_tables(database).await? {
+            let cols = self.table_columns(database, &t.name).await?;
+            let er_cols = cols
+                .into_iter()
+                .map(|c| ErColumn {
+                    pk: c.key == "PRI",
+                    fk: fk_cols.contains(&(t.name.clone(), c.name.clone())),
+                    name: c.name,
+                    data_type: c.data_type,
+                })
+                .collect();
+            tables.push(ErTable { name: t.name, columns: er_cols });
+        }
+        Ok(ErModel { tables, relations })
     }
 
     async fn close(&self) {

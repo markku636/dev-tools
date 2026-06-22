@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     at-kit Windows 打包腳本。自動檢查並安裝 Rust 與 Node.js，然後產出 .msi / .exe 安裝檔。
 

@@ -9,8 +9,8 @@ use crate::db::postgres::PostgresDriver;
 use crate::db::redis::RedisDriver;
 use crate::db::sqlite::SqliteDriver;
 use crate::db::{
-    CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, DbKind, KeyDetail, KeyEdit,
-    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, TableInfo,
+    AlterOp, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, DbKind, ErModel,
+    KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::ssh::TunnelGuard;
@@ -151,6 +151,33 @@ impl Active {
             Active::Sqlite(d) => d.key_edit(database, key, edit).await,
             Active::Mongo(d) => d.key_edit(database, key, edit).await,
             Active::Redis(d) => d.key_edit(database, key, edit).await,
+        }
+    }
+    async fn explain(&self, sql: &str) -> AppResult<QueryResult> {
+        match self {
+            Active::Mysql(d) => d.explain(sql).await,
+            Active::Postgres(d) => d.explain(sql).await,
+            Active::Sqlite(d) => d.explain(sql).await,
+            Active::Mongo(d) => d.explain(sql).await,
+            Active::Redis(d) => d.explain(sql).await,
+        }
+    }
+    async fn alter_table(&self, database: &str, table: &str, op: &AlterOp) -> AppResult<()> {
+        match self {
+            Active::Mysql(d) => d.alter_table(database, table, op).await,
+            Active::Postgres(d) => d.alter_table(database, table, op).await,
+            Active::Sqlite(d) => d.alter_table(database, table, op).await,
+            Active::Mongo(d) => d.alter_table(database, table, op).await,
+            Active::Redis(d) => d.alter_table(database, table, op).await,
+        }
+    }
+    async fn er_model(&self, database: &str) -> AppResult<ErModel> {
+        match self {
+            Active::Mysql(d) => d.er_model(database).await,
+            Active::Postgres(d) => d.er_model(database).await,
+            Active::Sqlite(d) => d.er_model(database).await,
+            Active::Mongo(d) => d.er_model(database).await,
+            Active::Redis(d) => d.er_model(database).await,
         }
     }
     async fn close(&self) {
@@ -381,6 +408,24 @@ impl ConnectionManager {
         edit: &KeyEdit,
     ) -> AppResult<u64> {
         self.get(id)?.active.key_edit(database, key, edit).await
+    }
+
+    pub async fn explain(&self, id: &str, sql: &str) -> AppResult<QueryResult> {
+        self.get(id)?.active.explain(sql).await
+    }
+
+    pub async fn alter_table(
+        &self,
+        id: &str,
+        database: &str,
+        table: &str,
+        op: &AlterOp,
+    ) -> AppResult<()> {
+        self.get(id)?.active.alter_table(database, table, op).await
+    }
+
+    pub async fn er_model(&self, id: &str, database: &str) -> AppResult<ErModel> {
+        self.get(id)?.active.er_model(database).await
     }
 
     /// 主動關閉並移除單一連線（含其 tunnel）。
