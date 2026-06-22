@@ -14,6 +14,8 @@ import {
   loadQueryHistory,
   SAVED_QUERIES_KEY,
   QUERY_HISTORY_KEY,
+  buildCreateTable,
+  type NewColumn,
 } from "./sql";
 
 describe("splitSqlStatements", () => {
@@ -157,5 +159,58 @@ describe("localStorage persistence guards", () => {
     expect(loadQueryHistory()).toEqual(["a", "b"]);
     localStorage.setItem(QUERY_HISTORY_KEY, "not json");
     expect(loadQueryHistory()).toEqual([]);
+  });
+});
+
+describe("buildCreateTable", () => {
+  const cols = (arr: Partial<NewColumn>[]): NewColumn[] =>
+    arr.map((c) => ({ name: "", type: "", notNull: false, pk: false, unique: false, default: "", ...c }));
+
+  it("PostgreSQL: PK + NOT NULL + DEFAULT, double-quote idents", () => {
+    const sql = buildCreateTable("postgres", "public", "users", cols([
+      { name: "id", type: "SERIAL", pk: true, notNull: true },
+      { name: "name", type: "VARCHAR(50)", notNull: true },
+      { name: "age", type: "INT", default: "0" },
+    ]));
+    expect(sql).toBe(
+      'CREATE TABLE "public"."users" (\n' +
+        '  "id" SERIAL NOT NULL,\n' +
+        '  "name" VARCHAR(50) NOT NULL,\n' +
+        '  "age" INT DEFAULT 0,\n' +
+        '  PRIMARY KEY ("id")\n' +
+        ");",
+    );
+  });
+
+  it("MySQL: backtick idents + composite PK + UNIQUE", () => {
+    const sql = buildCreateTable("mysql", "testdb", "t", cols([
+      { name: "a", type: "INT", pk: true },
+      { name: "b", type: "INT", pk: true },
+      { name: "email", type: "VARCHAR(100)", unique: true },
+    ]));
+    expect(sql).toBe(
+      "CREATE TABLE `testdb`.`t` (\n" +
+        "  `a` INT,\n" +
+        "  `b` INT,\n" +
+        "  `email` VARCHAR(100) UNIQUE,\n" +
+        "  PRIMARY KEY (`a`, `b`)\n" +
+        ");",
+    );
+  });
+
+  it("SQLite: no db prefix; filters columns missing name or type", () => {
+    const sql = buildCreateTable("sqlite", "main", "t", cols([
+      { name: "id", type: "INTEGER", pk: true },
+      { name: "", type: "TEXT" },
+      { name: "v", type: "" },
+    ]));
+    expect(sql).toBe("CREATE TABLE `t` (\n  `id` INTEGER,\n  PRIMARY KEY (`id`)\n);");
+  });
+
+  it("PK column does not also emit UNIQUE (PK already unique)", () => {
+    const sql = buildCreateTable("postgres", "public", "t", cols([
+      { name: "id", type: "INT", pk: true, unique: true },
+    ]));
+    expect(sql).not.toContain("UNIQUE");
   });
 });

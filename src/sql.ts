@@ -21,6 +21,40 @@ export function sqlLiteral(kind: DbKind, v: string | null): string {
   return `'${escaped}'`;
 }
 
+// ---- 設計表結構（table designer）：由欄位定義組出 CREATE TABLE ----
+export interface NewColumn {
+  name: string;
+  type: string; // 例：VARCHAR(50) / INT / TIMESTAMP / SERIAL
+  notNull: boolean;
+  pk: boolean;
+  unique: boolean;
+  default: string; // 空字串 = 無預設
+}
+
+// 組 CREATE TABLE。識別字以 quoteIdent 跳脫（防注入）；型別 / 預設值為原樣插值（DDL 無法參數化，
+// 由使用者對自己的資料庫負責，與 ALTER TABLE ADD COLUMN 一致）。PK 以表級 PRIMARY KEY(...) 表示，
+// 支援複合主鍵；UNIQUE 以欄級約束。空欄位（無名稱）會被略過。
+export function buildCreateTable(
+  kind: DbKind,
+  db: string,
+  table: string,
+  columns: NewColumn[],
+): string {
+  const qi = (id: string) => quoteIdent(kind, id);
+  const cols = columns.filter((c) => c.name.trim() && c.type.trim());
+  const lines: string[] = [];
+  for (const c of cols) {
+    let def = `${qi(c.name.trim())} ${c.type.trim()}`;
+    if (c.notNull) def += " NOT NULL";
+    if (c.unique && !c.pk) def += " UNIQUE";
+    if (c.default.trim()) def += ` DEFAULT ${c.default.trim()}`;
+    lines.push(def);
+  }
+  const pks = cols.filter((c) => c.pk).map((c) => qi(c.name.trim()));
+  if (pks.length) lines.push(`PRIMARY KEY (${pks.join(", ")})`);
+  return `CREATE TABLE ${qualifiedName(kind, db, table.trim())} (\n  ${lines.join(",\n  ")}\n);`;
+}
+
 // ---- 查詢歷史（localStorage，最近在前，去重，上限 50）----
 export const QUERY_HISTORY_KEY = "at-kit:queryHistory";
 const QUERY_HISTORY_CAP = 50;

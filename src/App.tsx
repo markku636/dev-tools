@@ -7,6 +7,7 @@ import BackupDialog from "./BackupDialog";
 import ErDiagram from "./ErDiagram";
 import RedisStatus from "./RedisStatus";
 import NewKeyDialog from "./NewKeyDialog";
+import CreateTableDialog from "./CreateTableDialog";
 import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile } from "./ui";
 import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
@@ -269,6 +270,8 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
   const [status, setStatus] = useState<{ id: string; name: string } | null>(null);
   // 新增 Redis 鍵對話框
   const [newKey, setNewKey] = useState<{ connId: string; db: string } | null>(null);
+  // 設計表結構（CREATE TABLE）對話框：帶連線 / 資料庫 / 種類。
+  const [designTable, setDesignTable] = useState<{ connId: string; db: string; kind: DbKind } | null>(null);
   // 連線 / 表 搜尋過濾字串
   const [filter, setFilter] = useState("");
   // 右鍵選單（SQL 表節點：產生 SQL）
@@ -359,6 +362,16 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
       setExpandedDbs((e) => ({ ...e, [key]: tables }));
     } catch (e: any) {
       toast.error(e?.message ?? "讀取表失敗");
+    }
+  };
+
+  // 強制重載某資料庫的表 / 集合清單（新增表 / 集合後刷新樹狀）。
+  const refreshTables = async (connId: string, db: string) => {
+    try {
+      const tables = await api.listTables(connId, db);
+      setExpandedDbs((e) => ({ ...e, [`${connId}:${db}`]: tables }));
+    } catch {
+      /* 略過刷新失敗 */
     }
   };
 
@@ -605,6 +618,7 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                       ["清空 DB（FLUSHDB）", () => flushDb(dbMenu.connId, dbMenu.db), true],
                     ]
                   : [
+                      ["設計表結構…", () => { if (dbConn) setDesignTable({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false],
                       ["匯出結構 SQL…", () => dumpSchema(dbMenu.connId, dbMenu.db), false],
                     ];
               return items.map(([label, fn, danger]) => (
@@ -661,7 +675,17 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
           connId={newKey.connId}
           database={newKey.db}
           onClose={() => setNewKey(null)}
-          onCreated={() => {/* 鍵列表於該 DB 的分頁開啟時由使用者自行重新整理 */}}
+          onCreated={() => refreshTables(newKey.connId, newKey.db)}
+        />
+      )}
+
+      {designTable && (
+        <CreateTableDialog
+          connId={designTable.connId}
+          database={designTable.db}
+          kind={designTable.kind}
+          onClose={() => setDesignTable(null)}
+          onCreated={() => refreshTables(designTable.connId, designTable.db)}
         />
       )}
     </div>
