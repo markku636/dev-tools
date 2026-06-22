@@ -1,0 +1,47 @@
+[package]
+name = "at-kit"
+version = "0.1.0"
+description = "Unified database management tool"
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "at_kit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "mysql", "postgres", "sqlite", "chrono", "uuid", "bigdecimal"] }
+mongodb = "3"
+futures = "0.3"
+redis = { version = "0.27", features = ["tokio-comp"] }
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+once_cell = "1"
+parking_lot = "0.12"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+bigdecimal = "0.4"
+# SSH Tunnel：純 Rust。用 ring 當 crypto backend（避免 aws-lc-sys 需要 NASM 才能在 Windows 編譯）。
+russh = { version = "0.61", default-features = false, features = ["ring", "flate2", "rsa"] }
+
+# OS keychain：依平台選用原生後端，避免在 Windows 上編譯 secret-service。
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

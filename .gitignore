@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+# build output
+dist/
+dist-ssr/
+# tauri / rust
+src-tauri/target/
+# env & secrets
+.env
+.env.local
+*.local
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+# logs
+*.log
+npm-debug.log*
