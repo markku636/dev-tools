@@ -8,6 +8,7 @@ import {
   buildAlterUserPassword,
   buildSetUserLock,
   buildAlterUserLimits,
+  buildAlterUserSsl,
   showGrantsSql,
   grantScope,
   buildGrant,
@@ -56,6 +57,8 @@ export default function UserManager({ connId, onClose }: { connId: string; onClo
   const [grants, setGrants] = useState<{ user: UserRow; lines: string[] } | null>(null);
   const [limitsFor, setLimitsFor] = useState<UserRow | null>(null);
   const [lim, setLim] = useState({ queries: "", updates: "", connections: "", userConnections: "" });
+  const [ssl, setSsl] = useState("NONE");
+  const [sslOrig, setSslOrig] = useState("NONE");
   const [gPrivs, setGPrivs] = useState<string[]>([]);
   const [gDb, setGDb] = useState("");
   const [gTable, setGTable] = useState("");
@@ -138,21 +141,25 @@ export default function UserManager({ connId, onClose }: { connId: string; onClo
       connections: u.meta.max_connections ?? "0",
       userConnections: u.meta.max_user_connections ?? "0",
     });
+    // ssl_type（userListSql 已將空字串轉「無」）對應到 REQUIRE 模式。
+    const st = (u.meta.ssl_type ?? "").toUpperCase();
+    const mode = st === "ANY" ? "SSL" : st === "X509" ? "X509" : "NONE";
+    setSsl(mode); setSslOrig(mode);
     setLimitsFor(u);
   };
   const applyLimits = async () => {
     if (!limitsFor) return;
-    const sql = buildAlterUserLimits(limitsFor.name, limitsFor.host, {
+    const limSql = buildAlterUserLimits(limitsFor.name, limitsFor.host, {
       queries: Number(lim.queries) || 0,
       updates: Number(lim.updates) || 0,
       connections: Number(lim.connections) || 0,
       userConnections: Number(lim.userConnections) || 0,
     });
-    if (!sql) { setLimitsFor(null); return; }
     setBusy(true);
     try {
-      await api.execDdl(connId, sql);
-      toast.success("資源限制已更新");
+      if (limSql) await api.execDdl(connId, limSql);
+      if (ssl !== sslOrig) await api.execDdl(connId, buildAlterUserSsl(limitsFor.name, limitsFor.host, ssl));
+      toast.success("帳號設定已更新");
       setLimitsFor(null);
       await refresh();
     } catch (e: any) {
@@ -293,11 +300,20 @@ export default function UserManager({ connId, onClose }: { connId: string; onClo
           <div className="bg-[#1a212b] w-[420px] max-w-[94vw] rounded-lg border border-white/10 shadow-2xl"
             onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
-              <span className="font-medium text-sm">資源限制：{limitsFor.name}@{limitsFor.host}</span>
+              <span className="font-medium text-sm">帳號設定：{limitsFor.name}@{limitsFor.host}</span>
               <button type="button" onClick={() => setLimitsFor(null)} className="ml-auto text-white/40 hover:text-white">✕</button>
             </div>
             <div className="p-5 space-y-2.5 text-xs">
-              <div className="text-white/40">0 = 無限制</div>
+              <label className="flex items-center gap-3">
+                <span className="text-white/55 w-28 shrink-0">SSL 需求</span>
+                <select value={ssl} onChange={(e) => setSsl(e.target.value)} title="SSL 需求"
+                  className="bg-[#0c1118] border border-white/15 rounded px-2 py-1">
+                  <option value="NONE">NONE（不要求）</option>
+                  <option value="SSL">SSL</option>
+                  <option value="X509">X509</option>
+                </select>
+              </label>
+              <div className="text-white/40 pt-1">每小時限制（0 = 無限制）</div>
               {([
                 ["每小時查詢數", "queries"], ["每小時更新數", "updates"],
                 ["每小時連線數", "connections"], ["最大同時連線", "userConnections"],

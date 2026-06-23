@@ -46,6 +46,7 @@ import {
   buildAlterUserPassword,
   buildSetUserLock,
   buildAlterUserLimits,
+  buildAlterUserSsl,
   showGrantsSql,
   grantScope,
   buildGrant,
@@ -490,6 +491,11 @@ describe("MySQL user management DDL", () => {
   });
   it("showGrantsSql targets the account", () => {
     expect(showGrantsSql("app", "%")).toBe("SHOW GRANTS FOR 'app'@'%'");
+  });
+  it("buildAlterUserSsl: REQUIRE NONE/SSL/X509", () => {
+    expect(buildAlterUserSsl("app", "%", "NONE")).toBe("ALTER USER 'app'@'%' REQUIRE NONE");
+    expect(buildAlterUserSsl("app", "%", "SSL")).toBe("ALTER USER 'app'@'%' REQUIRE SSL");
+    expect(buildAlterUserSsl("app", "%", "X509")).toBe("ALTER USER 'app'@'%' REQUIRE X509");
   });
   it("buildAlterUserLimits: WITH MAX_… clauses; floors/clamps; null when empty", () => {
     expect(buildAlterUserLimits("app", "%", { queries: 100, userConnections: 5 })).toBe(
