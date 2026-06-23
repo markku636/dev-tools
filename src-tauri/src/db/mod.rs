@@ -301,6 +301,12 @@ pub enum AlterOp {
         #[serde(default)]
         nullable: bool,
     },
+    /// 設定 / 清除欄位預設值（default = None 表示 DROP DEFAULT）。
+    SetDefault {
+        name: String,
+        #[serde(default)]
+        default: Option<String>,
+    },
 }
 
 /// ER 圖：欄位節點。

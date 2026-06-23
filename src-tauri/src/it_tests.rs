@@ -688,6 +688,15 @@ async fn mysql_full() {
         "MySQL 改型別後 mc 應為 varchar"
     );
     d.alter_table("testdb", "t", &AlterOp::DropColumn { name: "mc".into() }).await.unwrap();
+    // SetDefault：設定 → 清除欄位預設值。
+    d.alter_table("testdb", "t", &AlterOp::AddColumn { name: "dc".into(), data_type: "INT".into(), nullable: true, default: None }).await.unwrap();
+    d.alter_table("testdb", "t", &AlterOp::SetDefault { name: "dc".into(), default: Some("5".into()) }).await.unwrap();
+    assert!(
+        d.table_columns("testdb", "t").await.unwrap().iter().any(|c| c.name == "dc" && c.default.as_deref().is_some_and(|v| v.contains('5'))),
+        "MySQL 預設值應為 5"
+    );
+    d.alter_table("testdb", "t", &AlterOp::SetDefault { name: "dc".into(), default: None }).await.unwrap();
+    d.alter_table("testdb", "t", &AlterOp::DropColumn { name: "dc".into() }).await.unwrap();
     // 外鍵 list / drop（建父子表 → ADD CONSTRAINT → list_foreign_keys → DROP）。
     d.query("DROP TABLE IF EXISTS fk_child").await.ok();
     d.query("DROP TABLE IF EXISTS fk_parent").await.ok();
@@ -966,6 +975,15 @@ async fn postgres_full() {
         "PG 改型別後 mc 應為 text"
     );
     d.alter_table("public", "t", &AlterOp::DropColumn { name: "mc".into() }).await.unwrap();
+    // SetDefault：設定 → 清除欄位預設值。
+    d.alter_table("public", "t", &AlterOp::AddColumn { name: "dc".into(), data_type: "INT".into(), nullable: true, default: None }).await.unwrap();
+    d.alter_table("public", "t", &AlterOp::SetDefault { name: "dc".into(), default: Some("5".into()) }).await.unwrap();
+    assert!(
+        d.table_columns("public", "t").await.unwrap().iter().any(|c| c.name == "dc" && c.default.as_deref().is_some_and(|v| v.contains('5'))),
+        "PG 預設值應為 5"
+    );
+    d.alter_table("public", "t", &AlterOp::SetDefault { name: "dc".into(), default: None }).await.unwrap();
+    d.alter_table("public", "t", &AlterOp::DropColumn { name: "dc".into() }).await.unwrap();
     // 外鍵 list / drop（PG）。
     d.query("DROP TABLE IF EXISTS fk_child").await.ok();
     d.query("DROP TABLE IF EXISTS fk_parent").await.ok();

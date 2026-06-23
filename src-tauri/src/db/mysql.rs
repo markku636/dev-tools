@@ -536,6 +536,13 @@ impl DatabaseDriver for MysqlDriver {
                 let nn = if *nullable { " NULL" } else { " NOT NULL" };
                 format!("ALTER TABLE {q_tbl} MODIFY COLUMN {} {data_type}{nn}", quote_ident(name))
             }
+            AlterOp::SetDefault { name, default } => match default {
+                Some(v) => {
+                    crate::db::validate_column_spec("x", Some(v))?;
+                    format!("ALTER TABLE {q_tbl} ALTER COLUMN {} SET DEFAULT {v}", quote_ident(name))
+                }
+                None => format!("ALTER TABLE {q_tbl} ALTER COLUMN {} DROP DEFAULT", quote_ident(name)),
+            },
         };
         sqlx::query(&ddl)
             .execute(&self.pool)

@@ -155,7 +155,8 @@ export type AlterOp =
   | { op: "add_column"; name: string; data_type: string; nullable: boolean; default?: string | null }
   | { op: "drop_column"; name: string }
   | { op: "rename_column"; old: string; new: string }
-  | { op: "modify_column"; name: string; data_type: string; nullable: boolean };
+  | { op: "modify_column"; name: string; data_type: string; nullable: boolean }
+  | { op: "set_default"; name: string; default?: string | null };
 
 // ER 圖模型
 export interface ErColumn { name: string; data_type: string; pk: boolean; fk: boolean }

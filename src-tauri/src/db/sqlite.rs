@@ -381,10 +381,15 @@ impl DatabaseDriver for SqliteDriver {
                 quote_ident(old),
                 quote_ident(new)
             ),
-            // SQLite 無法直接改欄位型別（需重建表）；明確回報不支援。
+            // SQLite 無法直接改欄位型別 / 預設（需重建表）；明確回報不支援。
             AlterOp::ModifyColumn { .. } => {
                 return Err(AppError::Unsupported(
                     "SQLite 不支援直接修改欄位型別（需重建資料表）".into(),
+                ))
+            }
+            AlterOp::SetDefault { .. } => {
+                return Err(AppError::Unsupported(
+                    "SQLite 不支援直接修改欄位預設值（需重建資料表）".into(),
                 ))
             }
         };

@@ -1744,6 +1744,13 @@ function StructurePane({ tab }: { tab: OpenTab }) {
   // 切換欄位可空（保留型別）；改 NOT NULL 若有 NULL 值會由 DB 報錯並以 toast 呈現。
   const toggleNull = (name: string, dataType: string, nullable: boolean) =>
     doAlter({ op: "modify_column", name, data_type: dataType, nullable: !nullable }, nullable ? "已設為 NOT NULL" : "已設為可空");
+  // 設定 / 清除欄位預設值（值為原樣 DDL，如 0 / 'x' / CURRENT_TIMESTAMP；清空=移除）。
+  const setColDefault = async (name: string, current: string | null) => {
+    const v = await uiPrompt("預設值（清空=移除預設）", { title: `欄位「${name}」預設值`, defaultValue: current ?? "", placeholder: "如 0 / 'x' / CURRENT_TIMESTAMP" });
+    if (v === null) return;
+    const t = v.trim();
+    doAlter({ op: "set_default", name, default: t === "" ? null : t }, t === "" ? "已移除預設值" : "預設值已設定");
+  };
   // 新增外鍵（MySQL / PostgreSQL；走 exec_ddl）。
   const addFk = async (name: string, column: string, refTable: string, refColumn: string) => {
     if (!kind) return;
@@ -1869,7 +1876,15 @@ function StructurePane({ tab }: { tab: OpenTab }) {
                 )}
               </td>
               <td className="px-3 py-1 border-b border-white/5 mono text-white/50">
-                {c.default ?? <span className="text-white/25 italic">—</span>}
+                {kind !== "sqlite" ? (
+                  <button type="button" disabled={busy} title="點擊設定 / 清除預設值"
+                    onClick={() => setColDefault(c.name, c.default)}
+                    className="hover:bg-white/10 rounded px-1 disabled:opacity-40">
+                    {c.default ?? <span className="text-white/25 italic">—</span>}
+                  </button>
+                ) : (
+                  c.default ?? <span className="text-white/25 italic">—</span>
+                )}
               </td>
               <td className="px-3 py-1 border-b border-white/5 text-white/50 text-xs">{c.extra}</td>
               {isSql && (

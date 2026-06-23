@@ -575,6 +575,13 @@ impl DatabaseDriver for PostgresDriver {
                     "ALTER TABLE {q_tbl} ALTER COLUMN {qc} TYPE {data_type} USING {qc}::{data_type}, ALTER COLUMN {qc} {null_clause}"
                 )
             }
+            AlterOp::SetDefault { name, default } => match default {
+                Some(v) => {
+                    crate::db::validate_column_spec("x", Some(v))?;
+                    format!("ALTER TABLE {q_tbl} ALTER COLUMN {} SET DEFAULT {v}", quote_ident(name))
+                }
+                None => format!("ALTER TABLE {q_tbl} ALTER COLUMN {} DROP DEFAULT", quote_ident(name)),
+            },
         };
         sqlx::query(&ddl)
             .execute(&self.pool)
