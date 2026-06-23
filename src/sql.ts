@@ -175,6 +175,8 @@ export function buildDropForeignKey(kind: DbKind, db: string, table: string, nam
 }
 
 // 新增外鍵：ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY(col) REFERENCES refTable(refCol)（MySQL / PG 同語法）。
+// onDelete / onUpdate 為參照動作（NO ACTION / CASCADE / SET NULL / RESTRICT / SET DEFAULT），留空則不輸出該子句。
+// 動作為關鍵字（呼叫端以下拉白名單確保安全），原樣插值。
 export function buildAddForeignKey(
   kind: DbKind,
   db: string,
@@ -183,11 +185,15 @@ export function buildAddForeignKey(
   column: string,
   refTable: string,
   refColumn: string,
+  onDelete = "",
+  onUpdate = "",
 ): string {
   const qi = (id: string) => quoteIdent(kind, id);
+  const od = onDelete.trim() ? ` ON DELETE ${onDelete.trim()}` : "";
+  const ou = onUpdate.trim() ? ` ON UPDATE ${onUpdate.trim()}` : "";
   return (
     `ALTER TABLE ${qualifiedName(kind, db, table)} ADD CONSTRAINT ${qi(name.trim())} ` +
-    `FOREIGN KEY (${qi(column.trim())}) REFERENCES ${qualifiedName(kind, db, refTable.trim())} (${qi(refColumn.trim())});`
+    `FOREIGN KEY (${qi(column.trim())}) REFERENCES ${qualifiedName(kind, db, refTable.trim())} (${qi(refColumn.trim())})${od}${ou};`
   );
 }
 

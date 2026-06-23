@@ -1871,11 +1871,11 @@ function StructurePane({ tab }: { tab: OpenTab }) {
     doAlter({ op: "set_default", name, default: t === "" ? null : t }, t === "" ? "已移除預設值" : "預設值已設定");
   };
   // 新增外鍵（MySQL / PostgreSQL；走 exec_ddl）。
-  const addFk = async (name: string, column: string, refTable: string, refColumn: string) => {
+  const addFk = async (name: string, column: string, refTable: string, refColumn: string, onDelete: string, onUpdate: string) => {
     if (!kind) return;
     setBusy(true);
     try {
-      await api.execDdl(tab.connId, buildAddForeignKey(kind, tab.database, tab.table, name, column, refTable, refColumn));
+      await api.execDdl(tab.connId, buildAddForeignKey(kind, tab.database, tab.table, name, column, refTable, refColumn, onDelete, onUpdate));
       toast.success("外鍵已新增");
       setAddingFk(false);
       setNonce((n) => n + 1);
@@ -2200,17 +2200,21 @@ function AddColumnForm({ onSubmit, onCancel, busy }: {
 }
 
 // 新增索引表單：名稱 + 欄位多選（依點選順序組複合索引）+ 唯一。
+const FK_ACTIONS = ["", "CASCADE", "SET NULL", "RESTRICT", "NO ACTION", "SET DEFAULT"];
+
 function AddForeignKeyForm({ table, columns, busy, onSubmit, onCancel }: {
   table: string;
   columns: string[];
   busy: boolean;
-  onSubmit: (name: string, column: string, refTable: string, refColumn: string) => void;
+  onSubmit: (name: string, column: string, refTable: string, refColumn: string, onDelete: string, onUpdate: string) => void;
   onCancel: () => void;
 }) {
   const [column, setColumn] = useState(columns[0] ?? "");
   const [refTable, setRefTable] = useState("");
   const [refColumn, setRefColumn] = useState("");
   const [name, setName] = useState("");
+  const [onDelete, setOnDelete] = useState("");
+  const [onUpdate, setOnUpdate] = useState("");
   const ic = "bg-black/30 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-blue-500";
   const effName = name.trim() || `fk_${table}_${column}`;
   const valid = !!column && !!refTable.trim() && !!refColumn.trim();
@@ -2223,7 +2227,13 @@ function AddForeignKeyForm({ table, columns, busy, onSubmit, onCancel }: {
       <input value={refTable} onChange={(e) => setRefTable(e.target.value)} placeholder="參照表" className={`${ic} w-28`} />
       <input value={refColumn} onChange={(e) => setRefColumn(e.target.value)} placeholder="參照欄位" className={`${ic} w-28`} />
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder={effName} title="約束名稱（留空自動產生）" className={`${ic} w-40`} />
-      <button type="button" disabled={busy || !valid} onClick={() => onSubmit(effName, column, refTable, refColumn)}
+      <select value={onDelete} onChange={(e) => setOnDelete(e.target.value)} title="ON DELETE" className={ic}>
+        {FK_ACTIONS.map((a) => <option key={a} value={a}>{a ? `ON DELETE ${a}` : "ON DELETE（預設）"}</option>)}
+      </select>
+      <select value={onUpdate} onChange={(e) => setOnUpdate(e.target.value)} title="ON UPDATE" className={ic}>
+        {FK_ACTIONS.map((a) => <option key={a} value={a}>{a ? `ON UPDATE ${a}` : "ON UPDATE（預設）"}</option>)}
+      </select>
+      <button type="button" disabled={busy || !valid} onClick={() => onSubmit(effName, column, refTable, refColumn, onDelete, onUpdate)}
         className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40">建立</button>
       <button type="button" onClick={onCancel} className="px-2 py-1 text-xs rounded border border-white/15 hover:bg-white/5">取消</button>
     </div>

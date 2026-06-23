@@ -343,6 +343,13 @@ describe("table/database lifecycle DDL", () => {
     expect(buildAddForeignKey("postgres", "public", "orders", "fk_o_u", "user_id", "users", "id")).toBe(
       'ALTER TABLE "public"."orders" ADD CONSTRAINT "fk_o_u" FOREIGN KEY ("user_id") REFERENCES "public"."users" ("id");',
     );
+    // 參照動作：ON DELETE / ON UPDATE 子句（留空則不輸出）。
+    expect(buildAddForeignKey("mysql", "db", "orders", "fk_o_u", "user_id", "users", "id", "CASCADE", "SET NULL")).toBe(
+      "ALTER TABLE `db`.`orders` ADD CONSTRAINT `fk_o_u` FOREIGN KEY (`user_id`) REFERENCES `db`.`users` (`id`) ON DELETE CASCADE ON UPDATE SET NULL;",
+    );
+    expect(buildAddForeignKey("mysql", "db", "orders", "fk_o_u", "user_id", "users", "id", "", "CASCADE")).toBe(
+      "ALTER TABLE `db`.`orders` ADD CONSTRAINT `fk_o_u` FOREIGN KEY (`user_id`) REFERENCES `db`.`users` (`id`) ON UPDATE CASCADE;",
+    );
   });
 
   it("buildDropForeignKey: MySQL DROP FOREIGN KEY, PG DROP CONSTRAINT", () => {
