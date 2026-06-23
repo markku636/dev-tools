@@ -1456,6 +1456,10 @@ function ResultTable({ result }: { result: QueryResult }) {
     );
   }
 
+  // 大結果集只渲染前 N 列，避免數萬列 DOM 卡死 UI；複製 / 匯出仍取全部（用 result.rows）。
+  const MAX_RENDER = 2000;
+  const rendered = result.rows.length > MAX_RENDER ? result.rows.slice(0, MAX_RENDER) : result.rows;
+
   const cell = (r: number, c: number) => result.rows[r]?.[c] ?? null;
   const copyCell = (r: number, c: number) => copyToClipboard(cell(r, c) ?? "", "已複製儲存格");
   const copyRowTsv = (r: number) =>
@@ -1490,7 +1494,7 @@ function ResultTable({ result }: { result: QueryResult }) {
           </tr>
         </thead>
         <tbody className="mono">
-          {result.rows.map((row, i) => (
+          {rendered.map((row, i) => (
             <tr key={i} className="odd:bg-white/[0.025] hover:bg-white/5">
               <td className="px-3 py-1 border-b border-white/5 text-white/30">{i + 1}</td>
               {row.map((c, j) => (
@@ -1508,6 +1512,12 @@ function ResultTable({ result }: { result: QueryResult }) {
           ))}
         </tbody>
       </table>
+
+      {result.rows.length > MAX_RENDER && (
+        <div className="px-3 py-2 text-xs text-amber-300/80 bg-amber-500/5 border-t border-white/10">
+          僅顯示前 {MAX_RENDER.toLocaleString()} / 共 {result.rows.length.toLocaleString()} 列（避免卡頓）；請用「複製 / 匯出」取得全部。
+        </div>
+      )}
 
       {menu && (
         <>
