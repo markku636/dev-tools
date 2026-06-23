@@ -110,6 +110,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
   const [cellMenu, setCellMenu] = useState<{ r: number; c: number; x: number; y: number } | null>(null);
   const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
   const [selected, setSelected] = useState<{ r: number; c: number } | null>(null);
+  // 批次刪除：以目前頁列索引標記欲刪除的列（資料重載時清空，避免索引失效）。
+  const [marked, setMarked] = useState<Set<number>>(new Set());
   const [insertInitial, setInsertInitial] = useState<Record<string, string | null> | undefined>(undefined);
   // 整列表單檢視（點列號開啟，寬表友善）
   const [rowDetail, setRowDetail] = useState<number | null>(null);
@@ -260,6 +262,9 @@ function DataPane({ tab }: { tab: OpenTab }) {
   };
 
   useEffect(load, [tab.connId, tab.database, tab.table, page, pageSize, sorts, filters, matchAny, reloadNonce]);
+  // 資料集變動（換頁 / 排序 / 篩選 / 重載）即清除批次標記，避免列索引對不上資料。
+  useEffect(() => { setMarked(new Set()); },
+    [tab.connId, tab.database, tab.table, page, pageSize, sorts, filters, matchAny, reloadNonce]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total_rows / pageSize)) : 1;
   const startRow = data ? page * pageSize : 0;
@@ -359,6 +364,31 @@ function DataPane({ tab }: { tab: OpenTab }) {
       load();
     } catch (e: any) {
       setErr(e?.message ?? "刪除失敗");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const toggleMark = (r: number) =>
+    setMarked((m) => { const n = new Set(m); if (n.has(r)) n.delete(r); else n.add(r); return n; });
+
+  // 批次刪除已標記列：先擷取各列主鍵值（避免逐筆刪除後索引位移），再逐筆依主鍵刪除，最後重載。
+  const bulkDelete = async () => {
+    if (!data || !editable || marked.size === 0) return;
+    const idxs = [...marked];
+    if (!(await uiConfirm(`確定刪除選取的 ${idxs.length} 列？此動作無法復原。`,
+      { title: "刪除選取列", danger: true, confirmText: `刪除 ${idxs.length} 列` }))) return;
+    const pkSets = idxs.map((r) => data.primary_key.map((pk) => data.rows[r][data.columns.indexOf(pk)]));
+    setApplying(true);
+    setErr(null);
+    try {
+      for (const pkValues of pkSets)
+        await api.deleteRow(tab.connId, tab.database, tab.table, { pk_columns: data.primary_key, pk_values: pkValues });
+      setMarked(new Set());
+      load();
+    } catch (e: any) {
+      setErr(e?.message ?? "批次刪除失敗");
+      load(); // 反映可能的部分刪除結果
     } finally {
       setApplying(false);
     }
@@ -664,6 +694,16 @@ function DataPane({ tab }: { tab: OpenTab }) {
         >
           ＋ 新增列
         </button>
+        {editable && marked.size > 0 && (
+          <button
+            onClick={bulkDelete}
+            disabled={applying}
+            title="刪除已勾選的列"
+            className="px-2 py-1 rounded hover:bg-red-500/20 text-red-300 disabled:opacity-30"
+          >
+            🗑 刪除選取（{marked.size}）
+          </button>
+        )}
         {sorts.length > 0 && (
           <button
             onClick={() => setSorts([])}
@@ -731,11 +771,19 @@ function DataPane({ tab }: { tab: OpenTab }) {
             className={`text-sm border-collapse transition-opacity ${loading ? "opacity-50" : ""}`}
             style={{
               tableLayout: "fixed",
-              width: 48 + data.columns.filter((c) => !isHidden(c)).reduce((a, c) => a + colWidth(c), 0) + (editable ? 32 : 0),
+              width: 48 + data.columns.filter((c) => !isHidden(c)).reduce((a, c) => a + colWidth(c), 0) + (editable ? 64 : 0),
             }}
           >
             <thead className="sticky top-0 bg-[#1a212b]">
               <tr>
+                {editable && (
+                  <th className="px-1 py-1.5 border-b border-white/10 text-center w-8">
+                    <input type="checkbox" title="全選 / 取消本頁"
+                      checked={data.rows.length > 0 && marked.size === data.rows.length}
+                      ref={(el) => { if (el) el.indeterminate = marked.size > 0 && marked.size < data.rows.length; }}
+                      onChange={() => setMarked(marked.size === data.rows.length ? new Set() : new Set(data.rows.map((_, i) => i)))} />
+                  </th>
+                )}
                 <th className="text-left px-3 py-1.5 border-b border-white/10 text-white/30 w-12">#</th>
                 {data.columns.map((c, ci) => {
                   if (isHidden(c)) return null;
@@ -790,10 +838,18 @@ function DataPane({ tab }: { tab: OpenTab }) {
                     });
                   } : undefined}
                 >
+                  {editable && (
+                    <td className="px-1 py-1 border-b border-white/5 text-center">
+                      <input type="checkbox" title="勾選以批次刪除"
+                        checked={marked.has(i)} onChange={() => toggleMark(i)} />
+                    </td>
+                  )}
                   <td
                     onClick={() => setRowDetail(i)}
                     title="檢視整列"
-                    className="px-3 py-1 border-b border-white/5 text-white/30 cursor-pointer hover:bg-white/5 hover:text-white/60"
+                    className={`px-3 py-1 border-b border-white/5 cursor-pointer hover:bg-white/5 hover:text-white/60 ${
+                      marked.has(i) ? "text-red-300 bg-red-500/10" : "text-white/30"
+                    }`}
                   >
                     {startRow + i + 1}
                   </td>
