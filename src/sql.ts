@@ -262,6 +262,35 @@ export function resultToMarkdown(r: QueryResult): string {
   const rows = r.rows.map((row) => `| ${row.map(esc).join(" | ")} |`);
   return [header, sep, ...rows].join("\n");
 }
+// 把字串 / 識別字 / 註解 / $$ 區塊以空白取代，留下「程式碼」供關鍵字判斷（避免字面值內的字誤判）。
+function stripCode(sql: string): string {
+  let out = "";
+  let i = 0;
+  const n = sql.length;
+  while (i < n) {
+    const ch = sql[i];
+    const two = sql.slice(i, i + 2);
+    if (ch === "'" || ch === '"' || ch === "`") {
+      let j = i + 1;
+      while (j < n) { if (sql[j] === ch) { if (sql[j + 1] === ch) { j += 2; continue; } j++; break; } j++; }
+      out += " "; i = j; continue;
+    }
+    if (two === "--") { let j = i; while (j < n && sql[j] !== "\n") j++; out += " "; i = j; continue; }
+    if (two === "/*") { let j = i + 2; while (j < n && sql.slice(j, j + 2) !== "*/") j++; out += " "; i = Math.min(n, j + 2); continue; }
+    if (two === "$$") { let j = i + 2; while (j < n && sql.slice(j, j + 2) !== "$$") j++; out += " "; i = Math.min(n, j + 2); continue; }
+    out += ch; i++;
+  }
+  return out;
+}
+
+// 危險語句偵測（防手滑）：無 WHERE 的 UPDATE / DELETE，或 TRUNCATE。在字面值 / 註解外判斷關鍵字。
+export function isDangerousStatement(sql: string): boolean {
+  const code = stripCode(sql).toLowerCase().trim();
+  if (/^truncate\b/.test(code)) return true;
+  if (/^(update|delete)\b/.test(code) && !/\bwhere\b/.test(code)) return true;
+  return false;
+}
+
 export function fmtElapsed(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
 }

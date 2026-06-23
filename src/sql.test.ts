@@ -26,6 +26,7 @@ import {
   formatSql,
   resultToMarkdown,
   isSystemDatabase,
+  isDangerousStatement,
   type NewColumn,
 } from "./sql";
 
@@ -303,6 +304,24 @@ describe("resultToMarkdown", () => {
   });
   it("empty columns → empty string", () => {
     expect(resultToMarkdown({ columns: [], rows: [], rows_affected: 0 })).toBe("");
+  });
+});
+
+describe("isDangerousStatement", () => {
+  it("flags UPDATE/DELETE without WHERE and TRUNCATE", () => {
+    expect(isDangerousStatement("DELETE FROM t")).toBe(true);
+    expect(isDangerousStatement("UPDATE t SET a = 1")).toBe(true);
+    expect(isDangerousStatement("TRUNCATE TABLE t")).toBe(true);
+  });
+  it("allows statements with a real WHERE, and non-mutating statements", () => {
+    expect(isDangerousStatement("DELETE FROM t WHERE id = 1")).toBe(false);
+    expect(isDangerousStatement("UPDATE t SET a = 1 WHERE id = 2")).toBe(false);
+    expect(isDangerousStatement("SELECT * FROM t")).toBe(false);
+    expect(isDangerousStatement("INSERT INTO t VALUES (1)")).toBe(false);
+  });
+  it("does not count WHERE that appears only inside a string or comment", () => {
+    expect(isDangerousStatement("UPDATE t SET name = 'where' ")).toBe(true);
+    expect(isDangerousStatement("DELETE FROM t -- where id=1")).toBe(true);
   });
 });
 

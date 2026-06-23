@@ -19,7 +19,7 @@ import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile } fro
 import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
   loadSavedQueries, persistSavedQueries,
-  resultToTsv, resultToJson, resultToCsv, resultToMarkdown, fmtElapsed, splitSqlStatements,
+  resultToTsv, resultToJson, resultToCsv, resultToMarkdown, fmtElapsed, splitSqlStatements, isDangerousStatement,
   quoteIdent, qualifiedName,
   buildDropTable, buildDropView, buildTruncateTable, buildRenameTable, buildDuplicateTable, isSystemDatabase,
   formatSql,
@@ -1185,6 +1185,15 @@ function QueryPane() {
         // 非 SQL（Mongo / Redis）維持單一指令。
         const isSql = !!kind && EXPLAIN_KINDS.includes(kind);
         const statements = isSql ? splitSqlStatements(q) : [q];
+        // 防手滑：無 WHERE 的 UPDATE/DELETE 或 TRUNCATE 會影響整張表，先確認。
+        const dangerCount = isSql ? statements.filter((s) => isDangerousStatement(s)).length : 0;
+        if (dangerCount > 0) {
+          const ok = await uiConfirm(
+            `偵測到 ${dangerCount} 條無 WHERE 的 UPDATE / DELETE 或 TRUNCATE，將影響整張表的所有資料列。確定執行？`,
+            { title: "危險操作確認", danger: true, confirmText: "仍要執行" },
+          );
+          if (!ok) return; // finally 會還原 running 狀態
+        }
         let lastResultSet: QueryResult | null = null; // 最後一個有結果集（columns>0）的語句
         let affected = 0;
         for (let si = 0; si < statements.length; si++) {
