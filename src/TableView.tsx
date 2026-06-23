@@ -1741,6 +1741,9 @@ function StructurePane({ tab }: { tab: OpenTab }) {
     if (!t?.trim() || t.trim() === currentType) return;
     doAlter({ op: "modify_column", name, data_type: t.trim(), nullable }, "欄位型別已修改");
   };
+  // 切換欄位可空（保留型別）；改 NOT NULL 若有 NULL 值會由 DB 報錯並以 toast 呈現。
+  const toggleNull = (name: string, dataType: string, nullable: boolean) =>
+    doAlter({ op: "modify_column", name, data_type: dataType, nullable: !nullable }, nullable ? "已設為 NOT NULL" : "已設為可空");
   // 新增外鍵（MySQL / PostgreSQL；走 exec_ddl）。
   const addFk = async (name: string, column: string, refTable: string, refColumn: string) => {
     if (!kind) return;
@@ -1851,7 +1854,15 @@ function StructurePane({ tab }: { tab: OpenTab }) {
                 )}
               </td>
               <td className="px-3 py-1 border-b border-white/5 mono text-white/70">{c.data_type}</td>
-              <td className="px-3 py-1 border-b border-white/5 text-white/60">{c.nullable ? "YES" : "NO"}</td>
+              <td className="px-3 py-1 border-b border-white/5 text-white/60">
+                {kind !== "sqlite" ? (
+                  <button type="button" disabled={busy} title="點擊切換可空 / NOT NULL"
+                    onClick={() => toggleNull(c.name, c.data_type, c.nullable)}
+                    className="hover:bg-white/10 rounded px-1 disabled:opacity-40">{c.nullable ? "YES" : "NO"}</button>
+                ) : (
+                  c.nullable ? "YES" : "NO"
+                )}
+              </td>
               <td className="px-3 py-1 border-b border-white/5">
                 {c.key && (
                   <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">{c.key}</span>
