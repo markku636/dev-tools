@@ -1243,18 +1243,21 @@ function QueryPane() {
       return next;
     });
 
-  // 匯出查詢結果到檔案：依副檔名選 CSV / JSON / TSV。
+  // 匯出查詢結果到檔案：依副檔名選 CSV / JSON / TSV / Markdown。
   const exportResult = async () => {
     if (!result || result.columns.length === 0) return;
     const path = await pickSaveFile("query-result.csv", [
       { name: "CSV", extensions: ["csv"] },
       { name: "JSON", extensions: ["json"] },
       { name: "TSV", extensions: ["tsv", "txt"] },
+      { name: "Markdown", extensions: ["md"] },
     ]);
     if (!path) return;
     const lower = path.toLowerCase();
     const content = lower.endsWith(".json")
       ? resultToJson(result)
+      : lower.endsWith(".md")
+      ? resultToMarkdown(result)
       : lower.endsWith(".tsv") || lower.endsWith(".txt")
       ? resultToTsv(result)
       : resultToCsv(result);
