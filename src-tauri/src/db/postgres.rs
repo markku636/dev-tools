@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::db::{
     collect_relations, filter_op_sql, fmt_bytes, op_needs_value, AlterOp, CellEdit, ColumnInfo, ColumnStats,
-    ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, IndexInfo,
+    ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, ForeignKeyInfo, IndexInfo,
     PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
@@ -480,6 +480,36 @@ impl DatabaseDriver for PostgresDriver {
             .await
             .map(|_| ())
             .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn list_foreign_keys(&self, database: &str, table: &str) -> AppResult<Vec<ForeignKeyInfo>> {
+        // 單欄外鍵情境正確；複合外鍵的 column/ref_column 配對為近似（MVP）。
+        let rows = sqlx::query(
+            "SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name \
+             FROM information_schema.table_constraints tc \
+             JOIN information_schema.key_column_usage kcu \
+               ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema \
+             JOIN information_schema.constraint_column_usage ccu \
+               ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema \
+             WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1 AND tc.table_name = $2 \
+             ORDER BY tc.constraint_name",
+        )
+        .bind(database)
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                Some(ForeignKeyInfo {
+                    name: r.try_get::<String, _>(0).ok()?,
+                    column: r.try_get::<String, _>(1).ok()?,
+                    ref_table: r.try_get::<String, _>(2).ok()?,
+                    ref_column: r.try_get::<String, _>(3).ok()?,
+                })
+            })
+            .collect())
     }
 
     async fn table_info(&self, database: &str, table: &str) -> AppResult<Vec<(String, String)>> {

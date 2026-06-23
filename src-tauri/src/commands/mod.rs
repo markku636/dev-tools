@@ -6,7 +6,8 @@ use tauri::{AppHandle, State};
 use crate::backup::{self, BackupResult};
 use crate::db::{
     AlterOp, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, ErModel, KeyDetail, KeyEdit,
-    PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, ServerInfoSection, TableInfo,
+    ForeignKeyInfo, PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert,
+    ServerInfoSection, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::manager::ConnectionManager;
@@ -274,6 +275,17 @@ pub async fn table_info(
     table: String,
 ) -> AppResult<Vec<(String, String)>> {
     state.manager.table_info(&id, &database, &table).await
+}
+
+/// 列出本表外鍵（含約束名）。
+#[tauri::command]
+pub async fn list_foreign_keys(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    table: String,
+) -> AppResult<Vec<ForeignKeyInfo>> {
+    state.manager.list_foreign_keys(&id, &database, &table).await
 }
 
 /// 建立集合（MongoDB）。

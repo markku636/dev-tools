@@ -71,6 +71,7 @@ pub fn run() {
             commands::explain_query,
             commands::column_stats,
             commands::table_info,
+            commands::list_foreign_keys,
             commands::create_collection,
             commands::create_database,
             commands::drop_collection,

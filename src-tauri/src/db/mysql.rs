@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::db::{
     collect_relations, filter_op_sql, fmt_bytes, op_needs_value, AlterOp, CellEdit, ColumnInfo, ColumnStats,
-    ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, IndexInfo,
+    ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, ForeignKeyInfo, IndexInfo,
     PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
@@ -451,6 +451,31 @@ impl DatabaseDriver for MysqlDriver {
             .await
             .map(|_| ())
             .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn list_foreign_keys(&self, database: &str, table: &str) -> AppResult<Vec<ForeignKeyInfo>> {
+        let rows = sqlx::query(
+            "SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
+             FROM information_schema.KEY_COLUMN_USAGE \
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL \
+             ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION",
+        )
+        .bind(database)
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                Some(ForeignKeyInfo {
+                    name: str_col(r, 0)?,
+                    column: str_col(r, 1)?,
+                    ref_table: str_col(r, 2)?,
+                    ref_column: str_col(r, 3)?,
+                })
+            })
+            .collect())
     }
 
     async fn table_info(&self, database: &str, table: &str) -> AppResult<Vec<(String, String)>> {

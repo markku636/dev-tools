@@ -10,8 +10,8 @@ use crate::db::redis::RedisDriver;
 use crate::db::sqlite::SqliteDriver;
 use crate::db::{
     AlterOp, CellEdit, ColumnInfo, ColumnStats, ConnectionConfig, DataQuery, DatabaseDriver, DbKind,
-    ErModel, IndexInfo, KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete,
-    RowInsert, ServerInfoSection, TableInfo,
+    ErModel, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RoutineInfo,
+    RowDelete, RowInsert, ServerInfoSection, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::ssh::TunnelGuard;
@@ -179,6 +179,15 @@ impl Active {
             Active::Sqlite(d) => d.table_info(database, table).await,
             Active::Mongo(d) => d.table_info(database, table).await,
             Active::Redis(d) => d.table_info(database, table).await,
+        }
+    }
+    async fn list_foreign_keys(&self, database: &str, table: &str) -> AppResult<Vec<ForeignKeyInfo>> {
+        match self {
+            Active::Mysql(d) => d.list_foreign_keys(database, table).await,
+            Active::Postgres(d) => d.list_foreign_keys(database, table).await,
+            Active::Sqlite(d) => d.list_foreign_keys(database, table).await,
+            Active::Mongo(d) => d.list_foreign_keys(database, table).await,
+            Active::Redis(d) => d.list_foreign_keys(database, table).await,
         }
     }
     async fn create_collection(&self, database: &str, name: &str) -> AppResult<()> {
@@ -556,6 +565,10 @@ impl ConnectionManager {
 
     pub async fn table_info(&self, id: &str, database: &str, table: &str) -> AppResult<Vec<(String, String)>> {
         self.get(id)?.active.table_info(database, table).await
+    }
+
+    pub async fn list_foreign_keys(&self, id: &str, database: &str, table: &str) -> AppResult<Vec<ForeignKeyInfo>> {
+        self.get(id)?.active.list_foreign_keys(database, table).await
     }
 
     pub async fn create_collection(&self, id: &str, database: &str, name: &str) -> AppResult<()> {

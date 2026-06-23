@@ -22,6 +22,7 @@ import {
   buildDuplicateTable,
   buildCreateView,
   buildAddForeignKey,
+  buildDropForeignKey,
   buildRowUpdate,
   buildRowDelete,
   formatSql,
@@ -274,6 +275,11 @@ describe("table/database lifecycle DDL", () => {
     expect(buildAddForeignKey("postgres", "public", "orders", "fk_o_u", "user_id", "users", "id")).toBe(
       'ALTER TABLE "public"."orders" ADD CONSTRAINT "fk_o_u" FOREIGN KEY ("user_id") REFERENCES "public"."users" ("id");',
     );
+  });
+
+  it("buildDropForeignKey: MySQL DROP FOREIGN KEY, PG DROP CONSTRAINT", () => {
+    expect(buildDropForeignKey("mysql", "db", "orders", "fk_o_u")).toBe("ALTER TABLE `db`.`orders` DROP FOREIGN KEY `fk_o_u`;");
+    expect(buildDropForeignKey("postgres", "public", "orders", "fk_o_u")).toBe('ALTER TABLE "public"."orders" DROP CONSTRAINT "fk_o_u";');
   });
 
   it("buildRowUpdate / buildRowDelete: quoted idents, escaped values, PK WHERE", () => {

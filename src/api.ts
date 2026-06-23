@@ -65,6 +65,13 @@ export interface RoutineInfo {
   signature: string | null; // PG 函式 / 程序引數型別簽章（重載消歧用）
 }
 
+export interface ForeignKeyInfo {
+  name: string;
+  column: string;
+  ref_table: string;
+  ref_column: string;
+}
+
 export interface PagedData {
   columns: string[];
   rows: (string | null)[][];
@@ -286,6 +293,8 @@ export const api = {
     invoke<ColumnStats>("column_stats", { id, database, table, column }),
   tableInfo: (id: string, database: string, table: string) =>
     invoke<[string, string][]>("table_info", { id, database, table }),
+  listForeignKeys: (id: string, database: string, table: string) =>
+    invoke<ForeignKeyInfo[]>("list_foreign_keys", { id, database, table }),
   createCollection: (id: string, database: string, name: string) =>
     invoke<void>("create_collection", { id, database, name }),
   createDatabase: (id: string, name: string) => invoke<void>("create_database", { id, name }),

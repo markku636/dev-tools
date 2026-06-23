@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import {
-  api, ColumnInfo, ErRelation, Filter, IndexInfo, KeyDetail, KeyEdit, PagedData, RowInsert, Sort, SortDir,
+  api, ColumnInfo, ErRelation, Filter, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, PagedData, RowInsert, Sort, SortDir,
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard } from "./ui";
-import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey } from "./sql";
+import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import { AlterOp } from "./api";
@@ -1673,7 +1673,7 @@ function StructurePane({ tab }: { tab: OpenTab }) {
   const [ddl, setDdl] = useState<string | null>(null);
   const [indexes, setIndexes] = useState<IndexInfo[] | null>(null);
   const [addingIndex, setAddingIndex] = useState(false);
-  const [fks, setFks] = useState<ErRelation[] | null>(null); // 此表的外鍵（from_table = 本表）
+  const [fks, setFks] = useState<ForeignKeyInfo[] | null>(null); // 本表外鍵（含約束名，可刪除）
   const [incomingFks, setIncomingFks] = useState<ErRelation[] | null>(null); // 被哪些表參照（to_table = 本表）
   const [addingFk, setAddingFk] = useState(false);
   const isView = tab.objKind === "view";
@@ -1698,16 +1698,15 @@ function StructurePane({ tab }: { tab: OpenTab }) {
       .tableIndexes(tab.connId, tab.database, tab.table)
       .then((ix) => !cancelled && setIndexes(ix))
       .catch(() => !cancelled && setIndexes([]));
-    // 外鍵：取 ER 模型並過濾出本表為來源者（僅 SQL；失敗視為無）。
+    // 外鍵（本表）：用 list_foreign_keys（含約束名，可刪除）。被參照：取 ER 模型過濾 to_table。
     if (isSql) {
+      api.listForeignKeys(tab.connId, tab.database, tab.table)
+        .then((f) => !cancelled && setFks(f))
+        .catch(() => !cancelled && setFks([]));
       api
         .erModel(tab.connId, tab.database)
-        .then((m) => {
-          if (cancelled) return;
-          setFks(m.relations.filter((r) => r.from_table === tab.table));
-          setIncomingFks(m.relations.filter((r) => r.to_table === tab.table));
-        })
-        .catch(() => { if (!cancelled) { setFks([]); setIncomingFks([]); } });
+        .then((m) => !cancelled && setIncomingFks(m.relations.filter((r) => r.to_table === tab.table)))
+        .catch(() => !cancelled && setIncomingFks([]));
     } else {
       setFks([]);
       setIncomingFks([]);
@@ -1753,6 +1752,20 @@ function StructurePane({ tab }: { tab: OpenTab }) {
       setNonce((n) => n + 1);
     } catch (e: any) {
       toast.error(e?.message ?? "新增外鍵失敗");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dropFk = async (name: string) => {
+    if (!kind) return;
+    if (!(await uiConfirm(`刪除外鍵「${name}」？`, { title: "刪除外鍵", danger: true, confirmText: "刪除" }))) return;
+    setBusy(true);
+    try {
+      await api.execDdl(tab.connId, buildDropForeignKey(kind, tab.database, tab.table, name));
+      toast.success("外鍵已刪除");
+      setNonce((n) => n + 1);
+    } catch (e: any) {
+      toast.error(e?.message ?? "刪除外鍵失敗");
     } finally {
       setBusy(false);
     }
@@ -1941,17 +1954,25 @@ function StructurePane({ tab }: { tab: OpenTab }) {
             <table className="text-sm border-collapse w-full">
               <thead className="bg-[#1a212b]">
                 <tr>
-                  {["欄位", "參照", "參照欄位"].map((h) => (
+                  {["約束", "欄位", "參照", "參照欄位"].map((h) => (
                     <th key={h} className="text-left px-3 py-1.5 border-b border-white/10 font-medium">{h}</th>
                   ))}
+                  {kind !== "sqlite" && <th className="w-10 border-b border-white/10" aria-label="操作" />}
                 </tr>
               </thead>
               <tbody>
-                {fks.map((fk, i) => (
-                  <tr key={`${fk.from_column}-${i}`} className="hover:bg-white/5">
-                    <td className="px-3 py-1 border-b border-white/5 mono">{fk.from_column}</td>
-                    <td className="px-3 py-1 border-b border-white/5 mono text-white/50">→ {fk.to_table}</td>
-                    <td className="px-3 py-1 border-b border-white/5 mono">{fk.to_column}</td>
+                {fks.map((fk) => (
+                  <tr key={fk.name} className="hover:bg-white/5 group">
+                    <td className="px-3 py-1 border-b border-white/5 mono text-white/60">{fk.name}</td>
+                    <td className="px-3 py-1 border-b border-white/5 mono">{fk.column}</td>
+                    <td className="px-3 py-1 border-b border-white/5 mono text-white/50">→ {fk.ref_table}</td>
+                    <td className="px-3 py-1 border-b border-white/5 mono">{fk.ref_column}</td>
+                    {kind !== "sqlite" && (
+                      <td className="px-2 py-1 border-b border-white/5 text-right">
+                        <button type="button" title="刪除外鍵" disabled={busy} onClick={() => dropFk(fk.name)}
+                          className="px-1 text-white/20 group-hover:text-red-400 hover:bg-red-500/20 rounded disabled:opacity-40">−</button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

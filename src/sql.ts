@@ -108,6 +108,12 @@ export function buildCreateView(kind: DbKind, db: string, name: string, select: 
   return `CREATE VIEW ${qualifiedName(kind, db, name.trim())} AS\n${select.trim()};`;
 }
 
+// 刪除外鍵：MySQL → DROP FOREIGN KEY；PostgreSQL → DROP CONSTRAINT。
+export function buildDropForeignKey(kind: DbKind, db: string, table: string, name: string): string {
+  const clause = kind === "mysql" ? "DROP FOREIGN KEY" : "DROP CONSTRAINT";
+  return `ALTER TABLE ${qualifiedName(kind, db, table)} ${clause} ${quoteIdent(kind, name)};`;
+}
+
 // 新增外鍵：ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY(col) REFERENCES refTable(refCol)（MySQL / PG 同語法）。
 export function buildAddForeignKey(
   kind: DbKind,

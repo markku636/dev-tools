@@ -688,6 +688,21 @@ async fn mysql_full() {
         "MySQL 改型別後 mc 應為 varchar"
     );
     d.alter_table("testdb", "t", &AlterOp::DropColumn { name: "mc".into() }).await.unwrap();
+    // 外鍵 list / drop（建父子表 → ADD CONSTRAINT → list_foreign_keys → DROP）。
+    d.query("DROP TABLE IF EXISTS fk_child").await.ok();
+    d.query("DROP TABLE IF EXISTS fk_parent").await.ok();
+    d.query("CREATE TABLE fk_parent (id INT PRIMARY KEY)").await.unwrap();
+    d.query("CREATE TABLE fk_child (id INT, pid INT)").await.unwrap();
+    d.exec_ddl("ALTER TABLE fk_child ADD CONSTRAINT fk_c FOREIGN KEY (pid) REFERENCES fk_parent(id)").await.unwrap();
+    let fks = d.list_foreign_keys("testdb", "fk_child").await.unwrap();
+    assert!(
+        fks.iter().any(|f| f.name == "fk_c" && f.column == "pid" && f.ref_table == "fk_parent" && f.ref_column == "id"),
+        "MySQL 外鍵應列出，實得：{fks:?}"
+    );
+    d.exec_ddl("ALTER TABLE fk_child DROP FOREIGN KEY fk_c").await.unwrap();
+    assert!(d.list_foreign_keys("testdb", "fk_child").await.unwrap().is_empty(), "刪除後外鍵應消失");
+    d.query("DROP TABLE fk_child").await.unwrap();
+    d.query("DROP TABLE fk_parent").await.unwrap();
 
     // 新增 / 刪除資料庫（CREATE / DROP DATABASE）→ 出現後消失。
     d.query("DROP DATABASE IF EXISTS atkit_newdb").await.unwrap();
@@ -951,6 +966,21 @@ async fn postgres_full() {
         "PG 改型別後 mc 應為 text"
     );
     d.alter_table("public", "t", &AlterOp::DropColumn { name: "mc".into() }).await.unwrap();
+    // 外鍵 list / drop（PG）。
+    d.query("DROP TABLE IF EXISTS fk_child").await.ok();
+    d.query("DROP TABLE IF EXISTS fk_parent").await.ok();
+    d.query("CREATE TABLE fk_parent (id INT PRIMARY KEY)").await.unwrap();
+    d.query("CREATE TABLE fk_child (id INT, pid INT)").await.unwrap();
+    d.exec_ddl("ALTER TABLE fk_child ADD CONSTRAINT fk_c FOREIGN KEY (pid) REFERENCES fk_parent(id)").await.unwrap();
+    let fks = d.list_foreign_keys("public", "fk_child").await.unwrap();
+    assert!(
+        fks.iter().any(|f| f.name == "fk_c" && f.column == "pid" && f.ref_table == "fk_parent" && f.ref_column == "id"),
+        "PG 外鍵應列出，實得：{fks:?}"
+    );
+    d.exec_ddl("ALTER TABLE fk_child DROP CONSTRAINT fk_c").await.unwrap();
+    assert!(d.list_foreign_keys("public", "fk_child").await.unwrap().is_empty(), "刪除後外鍵應消失");
+    d.query("DROP TABLE fk_child").await.unwrap();
+    d.query("DROP TABLE fk_parent").await.unwrap();
 
     // 新增 / 刪除資料庫（PG → CREATE / DROP SCHEMA CASCADE）→ 出現後消失。
     d.query("DROP SCHEMA IF EXISTS atkit_newschema CASCADE").await.unwrap();

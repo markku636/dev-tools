@@ -128,6 +128,15 @@ pub struct IndexInfo {
     pub primary: bool,
 }
 
+/// 外鍵（含約束名，供結構分頁顯示與刪除）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ForeignKeyInfo {
+    pub name: String,
+    pub column: String,
+    pub ref_table: String,
+    pub ref_column: String,
+}
+
 /// 預存程序 / 函式 / 觸發器（routine browser 用）。
 #[derive(Debug, Clone, Serialize)]
 pub struct RoutineInfo {
@@ -485,6 +494,11 @@ pub trait DatabaseDriver: Send + Sync {
     /// 資料表統計（引擎 / 列數估計 / 大小 / 排序規則 / 註解…）。回傳 (標籤, 值) 清單，
     /// 各資料庫種類自填可得項目；預設回空（不擋屬性其他區塊）。
     async fn table_info(&self, _database: &str, _table: &str) -> AppResult<Vec<(String, String)>> {
+        Ok(vec![])
+    }
+
+    /// 列出本表外鍵（含約束名，供刪除）。非關聯式 / SQLite 預設回空。
+    async fn list_foreign_keys(&self, _database: &str, _table: &str) -> AppResult<Vec<ForeignKeyInfo>> {
         Ok(vec![])
     }
 
