@@ -746,6 +746,13 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                           ? "SELECT rolname AS role, rolsuper AS superuser, rolcreatedb AS createdb, rolcanlogin AS login, rolreplication AS replication FROM pg_roles ORDER BY rolname"
                           : "SELECT User, Host FROM mysql.user ORDER BY User, Host",
                       }), false] as [string, () => void, boolean],
+                      ["伺服器變數…", () => setServerQuery({
+                        connId: menuConn.id,
+                        title: "伺服器變數 / 設定",
+                        sql: menuConn.kind === "postgres"
+                          ? "SELECT name, setting, unit, category FROM pg_settings ORDER BY category, name"
+                          : "SHOW VARIABLES",
+                      }), false] as [string, () => void, boolean],
                     ]
                   : []),
                 ["屬性…", () => setConnProps(menuConn), false],
