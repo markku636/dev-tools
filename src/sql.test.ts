@@ -21,6 +21,8 @@ import {
   buildRenameTable,
   buildDuplicateTable,
   buildCreateView,
+  buildRowUpdate,
+  buildRowDelete,
   formatSql,
   resultToMarkdown,
   isSystemDatabase,
@@ -261,6 +263,15 @@ describe("table/database lifecycle DDL", () => {
   it("buildCreateView qualifies the name and trims the SELECT", () => {
     expect(buildCreateView("postgres", "public", "v ", " SELECT 1 ")).toBe('CREATE VIEW "public"."v" AS\nSELECT 1;');
     expect(buildCreateView("mysql", "db", "v", "SELECT * FROM t")).toBe("CREATE VIEW `db`.`v` AS\nSELECT * FROM t;");
+  });
+
+  it("buildRowUpdate / buildRowDelete: quoted idents, escaped values, PK WHERE", () => {
+    expect(buildRowUpdate("mysql", "t", ["a", "b"], ["1", "x'y"], ["id"], ["5"])).toBe(
+      "UPDATE `t` SET `a` = '1', `b` = 'x''y' WHERE `id` = '5';",
+    );
+    expect(buildRowDelete("postgres", "t", ["id"], ["5"])).toBe('DELETE FROM "t" WHERE "id" = \'5\';');
+    // 複合主鍵以 AND 串接；NULL 值以 NULL 呈現。
+    expect(buildRowDelete("mysql", "t", ["a", "b"], ["1", null])).toBe("DELETE FROM `t` WHERE `a` = '1' AND `b` = NULL;");
   });
 });
 

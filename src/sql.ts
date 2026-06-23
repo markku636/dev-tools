@@ -108,6 +108,33 @@ export function buildCreateView(kind: DbKind, db: string, name: string, select: 
   return `CREATE VIEW ${qualifiedName(kind, db, name.trim())} AS\n${select.trim()};`;
 }
 
+// 由某列產生 UPDATE / DELETE 範本（送往編輯器供檢視）。表名以 quoteIdent（與 copyRowInsert 一致，不限定 db），
+// 值以 sqlLiteral 跨方言跳脫。WHERE 用主鍵定位（呼叫端確保有主鍵）。
+export function buildRowUpdate(
+  kind: DbKind,
+  table: string,
+  columns: string[],
+  values: (string | null)[],
+  pkCols: string[],
+  pkVals: (string | null)[],
+): string {
+  const qi = (id: string) => quoteIdent(kind, id);
+  const sets = columns.map((c, i) => `${qi(c)} = ${sqlLiteral(kind, values[i])}`).join(", ");
+  const where = pkCols.map((c, i) => `${qi(c)} = ${sqlLiteral(kind, pkVals[i])}`).join(" AND ");
+  return `UPDATE ${qi(table)} SET ${sets} WHERE ${where};`;
+}
+
+export function buildRowDelete(
+  kind: DbKind,
+  table: string,
+  pkCols: string[],
+  pkVals: (string | null)[],
+): string {
+  const qi = (id: string) => quoteIdent(kind, id);
+  const where = pkCols.map((c, i) => `${qi(c)} = ${sqlLiteral(kind, pkVals[i])}`).join(" AND ");
+  return `DELETE FROM ${qi(table)} WHERE ${where};`;
+}
+
 // 保守 SQL 格式化：把語句切成「程式碼」與「逐字保留片段」（字串 '...'、識別字 "..."/`...`、
 // 行 / 區塊註解、PG $$），只對程式碼片段重排空白並於主要子句前換行。因僅變動字面值外的空白，
 // 不改變語意（SQL 對字面值外的空白不敏感），最差只是排版不美而非破壞查詢。不改關鍵字大小寫。

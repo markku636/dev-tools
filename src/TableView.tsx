@@ -4,7 +4,7 @@ import {
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard } from "./ui";
-import { quoteIdent, sqlLiteral } from "./sql";
+import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import { AlterOp } from "./api";
@@ -391,6 +391,22 @@ function DataPane({ tab }: { tab: OpenTab }) {
     const lits = rowValues(r).map((v) => sqlLiteral(k, v)).join(", ");
     copyToClipboard(`INSERT INTO ${quoteIdent(k, tab.table)} (${cols}) VALUES (${lits});`, "已複製為 INSERT");
   };
+  // 由某列產生 UPDATE / DELETE（需主鍵定位）。
+  const pkValuesOf = (r: number): (string | null)[] =>
+    data ? data.primary_key.map((pk) => cellValue(r, data.columns.indexOf(pk))) : [];
+  const copyRowUpdate = (r: number) => {
+    if (!data) return;
+    const k = connKind ?? "mysql";
+    copyToClipboard(
+      buildRowUpdate(k, tab.table, data.columns, rowValues(r), data.primary_key, pkValuesOf(r)),
+      "已複製為 UPDATE",
+    );
+  };
+  const copyRowDelete = (r: number) => {
+    if (!data) return;
+    const k = connKind ?? "mysql";
+    copyToClipboard(buildRowDelete(k, tab.table, data.primary_key, pkValuesOf(r)), "已複製為 DELETE");
+  };
   const duplicateRow = (r: number) => {
     if (!data) return;
     const vals = rowValues(r);
@@ -434,6 +450,13 @@ function DataPane({ tab }: { tab: OpenTab }) {
       ["複製整列 (TSV)", () => copyRowTsv(r), false],
       // INSERT 範本僅對 SQL 資料庫有意義（Mongo 用 JSON）。
       ...(isSqlKind ? [["複製為 INSERT", () => copyRowInsert(r), false] as [string, () => void, boolean]] : []),
+      // UPDATE / DELETE 範本需主鍵定位。
+      ...(isSqlKind && editable
+        ? [
+            ["複製為 UPDATE", () => copyRowUpdate(r), false] as [string, () => void, boolean],
+            ["複製為 DELETE", () => copyRowDelete(r), false] as [string, () => void, boolean],
+          ]
+        : []),
       "sep",
       ["篩選此值", () => filterByCell(r, c, false), false],
       ["排除此值", () => filterByCell(r, c, true), false],
