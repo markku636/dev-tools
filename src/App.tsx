@@ -1464,6 +1464,7 @@ function ResultTable({ result }: { result: QueryResult }) {
   const [menu, setMenu] = useState<{ r: number; c: number; x: number; y: number } | null>(null);
   const [colMenu, setColMenu] = useState<{ c: number; x: number; y: number } | null>(null);
   const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
+  const [rowDetail, setRowDetail] = useState<number | null>(null);
 
   if (result.columns.length === 0) {
     return (
@@ -1616,6 +1617,34 @@ function ResultTable({ result }: { result: QueryResult }) {
         />
       )}
 
+      {rowDetail !== null && viewRows[rowDetail] && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[95]" onClick={() => setRowDetail(null)}>
+          <div className="bg-[#1a212b] w-[560px] max-w-[92vw] max-h-[84vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
+              <span className="font-medium text-sm">列詳情</span>
+              <span className="text-xs text-white/40">第 {rowDetail + 1} 列</span>
+              <button type="button" onClick={() => setRowDetail(null)} className="ml-auto text-white/40 hover:text-white">✕</button>
+            </div>
+            <div className="overflow-auto divide-y divide-white/5">
+              {result.columns.map((col, j) => {
+                const v = viewRows[rowDetail][j];
+                return (
+                  <div key={col} className="flex gap-3 px-4 py-1.5 text-sm hover:bg-white/5">
+                    <span className="text-white/45 w-40 shrink-0 mono break-all">{col}</span>
+                    <span className="text-white/85 mono break-all flex-1">{v === null ? <span className="text-white/30 italic">NULL</span> : v}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-5 py-3 border-t border-white/10 flex justify-end">
+              <button type="button" onClick={() => setRowDetail(null)}
+                className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">關閉</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {menu && (
         <>
           <div className="fixed inset-0 z-[89]"
@@ -1626,6 +1655,7 @@ function ResultTable({ result }: { result: QueryResult }) {
             {(
               [
                 ["檢視內容…", () => setInspect({ r: menu.r, c: menu.c })],
+                ["檢視此列（表單）…", () => setRowDetail(menu.r)],
                 ["複製值", () => copyCell(menu.r, menu.c)],
                 ["複製整列 (TSV)", () => copyRowTsv(menu.r)],
                 ["複製整列 (JSON)", () => copyRowJson(menu.r)],
