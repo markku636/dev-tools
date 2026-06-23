@@ -1282,6 +1282,13 @@ async fn mongo_full() {
         d.insert_row("testdb", &coll, &ins(&["name", "age", "city"], &[name, age, city])).await.unwrap();
     }
 
+    // table_info（collStats）：應含文件數，且為 3。
+    let cinfo = d.table_info("testdb", &coll).await.unwrap();
+    assert!(
+        cinfo.iter().any(|(k, v)| k == "文件數" && v == "3"),
+        "Mongo table_info 應含文件數=3，實得：{cinfo:?}"
+    );
+
     // 多欄複合篩選 AND：age >= 30 且 city = "x" → alice、carol
     let pd = d
         .table_data(

@@ -5,8 +5,8 @@ use mongodb::{Client, IndexModel};
 use std::time::Duration;
 
 use crate::db::{
-    CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, Filter, IndexInfo, PagedData,
-    PoolStatus, QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
+    fmt_bytes, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, Filter, IndexInfo,
+    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -555,6 +555,39 @@ impl DatabaseDriver for MongoDriver {
             .create_collection("data")
             .await
             .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn table_info(&self, database: &str, table: &str) -> AppResult<Vec<(String, String)>> {
+        let stats = self
+            .db_handle(database)
+            .run_command(doc! { "collStats": table })
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        // collStats 的數值欄位型別依版本可能為 i32 / i64 / f64，逐一嘗試。
+        let num = |k: &str| -> Option<i64> {
+            stats
+                .get_i64(k)
+                .ok()
+                .or_else(|| stats.get_i32(k).ok().map(|v| v as i64))
+                .or_else(|| stats.get_f64(k).ok().map(|v| v as i64))
+        };
+        let mut out = Vec::new();
+        if let Some(c) = num("count") {
+            out.push(("文件數".into(), c.to_string()));
+        }
+        if let Some(s) = num("size") {
+            out.push(("大小".into(), fmt_bytes(s)));
+        }
+        if let Some(s) = num("storageSize") {
+            out.push(("儲存大小".into(), fmt_bytes(s)));
+        }
+        if let Some(n) = num("nindexes") {
+            out.push(("索引數".into(), n.to_string()));
+        }
+        if let Some(a) = num("avgObjSize") {
+            out.push(("平均文件大小".into(), fmt_bytes(a)));
+        }
+        Ok(out)
     }
 
     async fn drop_collection(&self, database: &str, name: &str) -> AppResult<()> {
