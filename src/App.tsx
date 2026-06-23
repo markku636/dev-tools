@@ -19,7 +19,7 @@ import ServerQueryDialog from "./ServerQueryDialog";
 import UserManager from "./UserManager";
 import DatabaseProperties from "./DatabaseProperties";
 import SearchObjectsDialog from "./SearchObjectsDialog";
-import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile } from "./ui";
+import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile, pickOpenFile } from "./ui";
 import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
   loadSavedQueries, persistSavedQueries,
@@ -1353,6 +1353,30 @@ function QueryPane() {
       return next;
     });
 
+  // 開啟 .sql 檔到編輯器（致敬 Navicat 查詢檔案）。
+  const openSqlFile = async () => {
+    const path = await pickOpenFile([{ name: "SQL", extensions: ["sql", "txt"] }]);
+    if (!path) return;
+    try {
+      persistSql(await api.readTextFile(path));
+      toast.success("已開啟檔案");
+    } catch (e: any) {
+      toast.error(e?.message ?? "開啟失敗");
+    }
+  };
+  // 將目前查詢另存為 .sql 檔。
+  const saveSqlFile = async () => {
+    if (!sql.trim()) return;
+    const path = await pickSaveFile("query.sql", [{ name: "SQL", extensions: ["sql"] }]);
+    if (!path) return;
+    try {
+      await api.saveTextFile(path, sql);
+      toast.success("已另存 SQL");
+    } catch (e: any) {
+      toast.error(e?.message ?? "另存失敗");
+    }
+  };
+
   // 匯出查詢結果到檔案：依副檔名選 CSV / JSON / TSV / Markdown。
   const exportResult = async () => {
     if (!result || result.columns.length === 0) return;
@@ -1428,6 +1452,10 @@ function QueryPane() {
                 </>
               )}
             </div>
+            <button type="button" onClick={openSqlFile} title="開啟 .sql 檔"
+              className="text-xs px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/70">📂 開啟</button>
+            <button type="button" onClick={saveSqlFile} title="另存為 .sql 檔"
+              className="text-xs px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/70">💾 另存</button>
             <button type="button" onClick={saveCurrentQuery} title="收藏目前查詢"
               className="text-xs px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/70">★</button>
             <div className="relative">

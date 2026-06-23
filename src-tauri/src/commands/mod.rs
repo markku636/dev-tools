@@ -159,6 +159,17 @@ pub async fn save_text_file(path: String, content: String) -> AppResult<()> {
     std::fs::write(&path, content).map_err(|e| AppError::Query(format!("寫入失敗：{e}")))
 }
 
+/// 讀取使用者（透過原生開啟對話框）選定之文字檔內容。供查詢編輯器開啟 .sql 檔用。
+/// 上限 8 MiB，避免誤選巨大檔案塞爆編輯器 / 記憶體。
+#[tauri::command]
+pub async fn read_text_file(path: String) -> AppResult<String> {
+    let meta = std::fs::metadata(&path).map_err(|e| AppError::Query(format!("讀取失敗：{e}")))?;
+    if meta.len() > 8 * 1024 * 1024 {
+        return Err(AppError::Query("檔案過大（上限 8 MiB）".into()));
+    }
+    std::fs::read_to_string(&path).map_err(|e| AppError::Query(format!("讀取失敗：{e}")))
+}
+
 #[tauri::command]
 pub async fn update_cell(
     state: State<'_, AppState>,

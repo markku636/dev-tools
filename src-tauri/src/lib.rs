@@ -58,6 +58,7 @@ pub fn run() {
             commands::table_data,
             commands::run_query,
             commands::save_text_file,
+            commands::read_text_file,
             commands::update_cell,
             commands::insert_row,
             commands::delete_row,

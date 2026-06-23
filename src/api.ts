@@ -291,6 +291,7 @@ export const api = {
     invoke<QueryResult>("run_query", { id, sql }),
   saveTextFile: (path: string, content: string) =>
     invoke<void>("save_text_file", { path, content }),
+  readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
   updateCell: (id: string, database: string, table: string, edit: CellEdit) =>
     invoke<number>("update_cell", { id, database, table, edit }),
   insertRow: (id: string, database: string, table: string, row: RowInsert) =>
