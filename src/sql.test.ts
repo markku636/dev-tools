@@ -20,6 +20,7 @@ import {
   buildTruncateTable,
   buildRenameTable,
   buildDuplicateTable,
+  buildCreateView,
   isSystemDatabase,
   type NewColumn,
 } from "./sql";
@@ -253,6 +254,11 @@ describe("table/database lifecycle DDL", () => {
     expect(buildDuplicateTable("sqlite", "main", "t", "t_copy")).toBe(
       "CREATE TABLE `t_copy` AS SELECT * FROM `t` WHERE 0;",
     );
+  });
+
+  it("buildCreateView qualifies the name and trims the SELECT", () => {
+    expect(buildCreateView("postgres", "public", "v ", " SELECT 1 ")).toBe('CREATE VIEW "public"."v" AS\nSELECT 1;');
+    expect(buildCreateView("mysql", "db", "v", "SELECT * FROM t")).toBe("CREATE VIEW `db`.`v` AS\nSELECT * FROM t;");
   });
 });
 

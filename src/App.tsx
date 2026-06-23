@@ -11,6 +11,7 @@ import CreateTableDialog from "./CreateTableDialog";
 import ConnectionProperties from "./ConnectionProperties";
 import TableProperties from "./TableProperties";
 import RoutinesDialog from "./RoutinesDialog";
+import CreateViewDialog from "./CreateViewDialog";
 import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile } from "./ui";
 import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
@@ -280,6 +281,8 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
   const [connProps, setConnProps] = useState<ConnectionConfig | null>(null);
   // 預存程序 / 觸發器瀏覽器。
   const [routines, setRoutines] = useState<{ connId: string; db: string; kind: DbKind } | null>(null);
+  // 新增視圖對話框。
+  const [createView, setCreateView] = useState<{ connId: string; db: string; kind: DbKind } | null>(null);
   // 連線 / 表 搜尋過濾字串
   const [filter, setFilter] = useState("");
   // 右鍵選單（SQL 表節點：產生 SQL）。objKind 為物件種類（"table" | "view"），決定生命週期 DDL。
@@ -780,6 +783,7 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                       ];
                       // SQLite 為單檔，無多資料庫概念，故不顯示新增 / 刪除資料庫。
                       if (k !== "sqlite") arr.push([`新增${noun}…`, () => { if (dbConn) createDatabase(dbMenu.connId, dbConn.kind); }, false]);
+                      arr.push(["新增視圖…", () => { if (dbConn) setCreateView({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false]);
                       arr.push(["預存程序 / 觸發器…", () => { if (dbConn) setRoutines({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false]);
                       arr.push(["匯出結構 SQL…", () => dumpSchema(dbMenu.connId, dbMenu.db), false]);
                       arr.push(["編輯屬性…", editConn, false]);
@@ -907,6 +911,16 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
           db={routines.db}
           kind={routines.kind}
           onClose={() => setRoutines(null)}
+        />
+      )}
+
+      {createView && (
+        <CreateViewDialog
+          connId={createView.connId}
+          database={createView.db}
+          kind={createView.kind}
+          onClose={() => setCreateView(null)}
+          onCreated={() => refreshTables(createView.connId, createView.db)}
         />
       )}
     </div>

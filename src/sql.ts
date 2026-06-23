@@ -103,6 +103,11 @@ export function buildDuplicateTable(kind: DbKind, db: string, src: string, dst: 
   return `CREATE TABLE ${to} AS SELECT * FROM ${from} WHERE 0;`;
 }
 
+// 建立視圖：CREATE VIEW <qualified> AS <select>（三種 SQL 同語法）。
+export function buildCreateView(kind: DbKind, db: string, name: string, select: string): string {
+  return `CREATE VIEW ${qualifiedName(kind, db, name.trim())} AS\n${select.trim()};`;
+}
+
 // ---- 查詢歷史（localStorage，最近在前，去重，上限 50）----
 export const QUERY_HISTORY_KEY = "at-kit:queryHistory";
 const QUERY_HISTORY_CAP = 50;
