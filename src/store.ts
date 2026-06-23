@@ -22,6 +22,8 @@ interface AppStore {
   activeTabKey: string | null;
   // 由側欄「產生 SQL」送往查詢編輯器的待載入語句（消費後清空）。
   pendingSql: string | null;
+  // 待開啟新增列對話框的分頁鍵（右鍵「新增資料列」→ 開表後由該分頁消費）。
+  pendingInsert: string | null;
   // 資料重載信號：key（connId:db:table）→ nonce，外部操作（如 TRUNCATE）後遞增以強制開啟中的資料頁重載。
   dataReload: Record<string, number>;
 
@@ -44,6 +46,9 @@ interface AppStore {
   // 將一段 SQL 載入查詢編輯器並切到查詢分頁。
   requestQuery: (sql: string) => void;
   clearPendingSql: () => void;
+  // 要求某分頁開啟新增列對話框（右鍵新增資料列）。
+  requestInsert: (key: string) => void;
+  clearPendingInsert: () => void;
   // 遞增某表的資料重載 nonce（TRUNCATE 後呼叫，使開啟中的資料頁重新查詢）。
   bumpDataReload: (connId: string, database: string, table: string) => void;
 }
@@ -55,6 +60,7 @@ export const useStore = create<AppStore>((set) => ({
   tabs: [],
   activeTabKey: null,
   pendingSql: null,
+  pendingInsert: null,
   dataReload: {},
 
   setConnections: (cs) => set({ connections: cs }),
@@ -115,6 +121,8 @@ export const useStore = create<AppStore>((set) => ({
   // 設定待載入 SQL 並切到查詢分頁（QueryPane 掛載後消費）。
   requestQuery: (sql) => set({ pendingSql: sql, activeTabKey: "__query__" }),
   clearPendingSql: () => set({ pendingSql: null }),
+  requestInsert: (key) => set({ pendingInsert: key }),
+  clearPendingInsert: () => set({ pendingInsert: null }),
   setActiveTab: (key) => set({ activeTabKey: key }),
   setTabView: (key, view) =>
     set((s) => ({

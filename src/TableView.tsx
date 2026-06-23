@@ -212,6 +212,15 @@ function DataPane({ tab }: { tab: OpenTab }) {
   // 外部資料重載信號（如 TRUNCATE 後）：nonce 變動即觸發重新查詢，保留分頁 / 篩選狀態。
   const reloadNonce = useStore((s) => s.dataReload[tab.key] ?? 0);
 
+  // 右鍵「新增資料列」要求：開啟新增列對話框（資料載入後 InsertDialog 才會實際渲染）。
+  const pendingInsert = useStore((s) => s.pendingInsert);
+  useEffect(() => {
+    if (pendingInsert === tab.key) {
+      setInserting(true);
+      useStore.getState().clearPendingInsert();
+    }
+  }, [pendingInsert, tab.key]);
+
   const load = () => {
     let cancelled = false;
     setLoading(true);
@@ -244,6 +253,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
   const totalPages = data ? Math.max(1, Math.ceil(data.total_rows / pageSize)) : 1;
   const startRow = data ? page * pageSize : 0;
   const editable = !!data && data.primary_key.length > 0;
+  // 新增列不需主鍵（INSERT 不依賴 PK）；只有更新 / 刪除個別列才需 PK 來定位。
+  const insertable = !!data && data.columns.length > 0;
   const dirtyCount = Object.keys(edits).length;
   // Redis 鍵列右鍵需定位 key / ttl 欄。
   const keyIdx = data ? data.columns.indexOf("key") : -1;
@@ -572,9 +583,9 @@ function DataPane({ tab }: { tab: OpenTab }) {
           ⧩ 篩選{filters.length ? `（${filters.length}）` : ""}
         </button>
         <button
-          onClick={() => editable && setInserting(true)}
-          disabled={!editable}
-          title={editable ? "新增列" : "此表無主鍵，不可編輯"}
+          onClick={() => insertable && setInserting(true)}
+          disabled={!insertable}
+          title={insertable ? "新增列" : "無欄位可新增"}
           className="px-2 py-1 rounded hover:bg-white/10 text-white/50 disabled:opacity-30 disabled:hover:bg-transparent"
         >
           ＋ 新增列

@@ -821,6 +821,11 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                       ["開啟資料表", () => useStore.getState().openTable(tableMenu.connId, tableMenu.db, tableMenu.table)],
                       ["屬性…", () => setTableProps({ connId: tableMenu.connId, db: tableMenu.db, table: tableMenu.table, kind: tableMenu.kind, objKind: tableMenu.objKind })],
                     ];
+                    // 新增資料列：開啟資料分頁並自動彈出新增列對話框（INSERT 不需主鍵）。視圖通常不可插入，略過。
+                    if (!isView) arr.push(["新增資料列…", () => {
+                      useStore.getState().openTable(tableMenu.connId, tableMenu.db, tableMenu.table);
+                      useStore.getState().requestInsert(`${tableMenu.connId}:${tableMenu.db}:${tableMenu.table}`);
+                    }]);
                     // 設計表結構：直接開啟結構分頁（欄位增刪改名 + 索引管理）。視圖無可設計結構，略過。
                     if (!isView) arr.push(["設計表結構…", () => useStore.getState().openTable(tableMenu.connId, tableMenu.db, tableMenu.table, "structure")]);
                     arr.push(
