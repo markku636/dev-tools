@@ -27,6 +27,7 @@ import {
   buildTableMaintenance,
   tableOptionsSql,
   buildAlterTableOptions,
+  buildConvertCharset,
   buildAddForeignKey,
   buildDropForeignKey,
   buildRowUpdate,
@@ -297,9 +298,15 @@ describe("table/database lifecycle DDL", () => {
     expect(buildReplaceView("postgres", "public", "v ", " SELECT 2 ")).toBe('CREATE OR REPLACE VIEW "public"."v" AS\nSELECT 2;');
   });
 
-  it("tableOptionsSql: information_schema.TABLES for engine/comment/auto_increment", () => {
+  it("tableOptionsSql: information_schema.TABLES for engine/comment/auto_increment/collation", () => {
     expect(tableOptionsSql("db", "t")).toBe(
-      "SELECT ENGINE, TABLE_COMMENT, AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'db' AND TABLE_NAME = 't'",
+      "SELECT ENGINE, TABLE_COMMENT, AUTO_INCREMENT, TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'db' AND TABLE_NAME = 't'",
+    );
+  });
+  it("buildConvertCharset: CONVERT TO CHARACTER SET (+ optional COLLATE)", () => {
+    expect(buildConvertCharset("db", "t", "utf8mb4", "")).toBe("ALTER TABLE `db`.`t` CONVERT TO CHARACTER SET utf8mb4");
+    expect(buildConvertCharset("db", "t", "utf8mb4", "utf8mb4_unicode_ci")).toBe(
+      "ALTER TABLE `db`.`t` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
     );
   });
   it("buildAlterTableOptions: combines changed parts; null when none", () => {

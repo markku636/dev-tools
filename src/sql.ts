@@ -124,10 +124,16 @@ export function buildReplaceView(kind: DbKind, db: string, name: string, select:
   return `CREATE OR REPLACE VIEW ${qualifiedName(kind, db, name.trim())} AS\n${select.trim()};`;
 }
 
-// 取得資料表選項（MySQL）：引擎 / 註解 / AUTO_INCREMENT，供 TableProperties 編輯前回填。
+// 取得資料表選項（MySQL）：引擎 / 註解 / AUTO_INCREMENT / 定序，供 TableProperties 編輯前回填。
 export function tableOptionsSql(db: string, table: string): string {
-  return "SELECT ENGINE, TABLE_COMMENT, AUTO_INCREMENT FROM information_schema.TABLES " +
+  return "SELECT ENGINE, TABLE_COMMENT, AUTO_INCREMENT, TABLE_COLLATION FROM information_schema.TABLES " +
     `WHERE TABLE_SCHEMA = ${sqlLiteral("mysql", db)} AND TABLE_NAME = ${sqlLiteral("mysql", table)}`;
+}
+// 轉換資料表字元集 / 定序（CONVERT TO，會重寫所有文字欄位）。charset / collation 為關鍵字（呼叫端以白名單 /
+// SHOW COLLATION 結果確保安全）；collation 留空則用該字元集預設。
+export function buildConvertCharset(db: string, table: string, charset: string, collation: string): string {
+  const coll = collation.trim() ? ` COLLATE ${collation.trim()}` : "";
+  return `ALTER TABLE ${qualifiedName("mysql", db, table)} CONVERT TO CHARACTER SET ${charset}${coll}`;
 }
 // 變更資料表選項（MySQL）：依有變動的欄位組合單一 ALTER TABLE。engine 為關鍵字（呼叫端以白名單下拉確保安全）；
 // comment 為字面值跳脫；autoIncrement 取整數插值。無任何變動回 null。

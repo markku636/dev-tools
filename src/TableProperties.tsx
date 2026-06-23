@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ColumnInfo, DbKind, IndexInfo } from "./api";
-import { useEscToClose, toast } from "./ui";
-import { tableOptionsSql, buildAlterTableOptions } from "./sql";
+import { useEscToClose, toast, uiConfirm } from "./ui";
+import { tableOptionsSql, buildAlterTableOptions, buildConvertCharset } from "./sql";
 
 const TABLE_ENGINES = ["InnoDB", "MyISAM", "MEMORY", "ARCHIVE", "CSV"];
+const CHARSETS = ["utf8mb4", "utf8", "latin1", "ascii", "big5", "gbk", "gb2312", "utf16"];
 
 // 資料表 / 視圖 / 集合屬性：唯讀彙整欄位、索引與列數（沿用既有 API，免後端改動）。
 export default function TableProperties({ connId, db, table, kind, objKind, onClose }: {
@@ -31,6 +32,10 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
   const [autoInc, setAutoInc] = useState("");
   const [orig, setOrig] = useState<{ engine: string; comment: string; autoInc: string } | null>(null);
   const [savingOpts, setSavingOpts] = useState(false);
+  const [curCollation, setCurCollation] = useState("");
+  const [charset, setCharset] = useState("utf8mb4");
+  const [collation, setCollation] = useState("");
+  const [converting, setConverting] = useState(false);
 
   const loadStats = () => {
     api.tableInfo(connId, db, table).then((s) => aliveRef.current && setStats(s)).catch(() => aliveRef.current && setStats([]));
@@ -39,9 +44,12 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
     if (!optionsEditable) return;
     api.runQuery(connId, tableOptionsSql(db, table)).then((r) => {
       if (!aliveRef.current || r.rows.length === 0) return;
-      const [e, c, ai] = r.rows[0];
+      const [e, c, ai, coll] = r.rows[0];
       setEngine(e ?? ""); setComment(c ?? ""); setAutoInc(ai ?? "");
       setOrig({ engine: e ?? "", comment: c ?? "", autoInc: ai ?? "" });
+      setCurCollation(coll ?? "");
+      // 預設字元集取現有定序的前綴（如 utf8mb4_general_ci → utf8mb4）。
+      if (coll) { const cs = coll.split("_")[0]; if (CHARSETS.includes(cs)) setCharset(cs); }
     }).catch(() => {});
   };
 
@@ -72,6 +80,22 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
       toast.error(e?.message ?? "更新失敗");
     } finally {
       setSavingOpts(false);
+    }
+  };
+
+  const convertCharset = async () => {
+    if (!(await uiConfirm(
+      `將資料表「${table}」轉換為字元集 ${charset}${collation.trim() ? ` / ${collation.trim()}` : ""}？\n此操作會重寫所有文字欄位，大表可能較久且鎖表。`,
+      { title: "轉換字元集", danger: true, confirmText: "轉換" }))) return;
+    setConverting(true);
+    try {
+      await api.execDdl(connId, buildConvertCharset(db, table, charset, collation));
+      toast.success("字元集已轉換");
+      loadStats(); loadOptions();
+    } catch (e: any) {
+      toast.error(e?.message ?? "轉換失敗");
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -146,6 +170,24 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
                   <button type="button" onClick={applyOptions} disabled={savingOpts || !orig}
                     className="px-3 py-1.5 text-xs rounded bg-blue-600/80 hover:bg-blue-600 disabled:opacity-40">
                     {savingOpts ? "套用中…" : "套用"}</button>
+                </div>
+
+                <div className="border-t border-white/10 pt-2.5 space-y-2">
+                  <div className="text-white/40 text-[11px]">
+                    字元集轉換{curCollation ? ` · 目前定序：${curCollation}` : ""}
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select value={charset} onChange={(e) => setCharset(e.target.value)} title="字元集"
+                      className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 text-xs">
+                      {CHARSETS.map((cs) => <option key={cs} value={cs}>{cs}</option>)}
+                    </select>
+                    <input value={collation} onChange={(e) => setCollation(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))}
+                      title="定序（可留空用預設）"
+                      className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 text-xs w-48 mono" placeholder="定序（預設）" />
+                    <button type="button" onClick={convertCharset} disabled={converting}
+                      className="px-3 py-1.5 text-xs rounded border border-amber-400/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
+                      {converting ? "轉換中…" : "轉換字元集"}</button>
+                  </div>
                 </div>
               </div>
             </Section>
