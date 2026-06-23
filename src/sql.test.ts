@@ -21,6 +21,7 @@ import {
   buildRenameTable,
   buildDuplicateTable,
   buildCreateView,
+  formatSql,
   isSystemDatabase,
   type NewColumn,
 } from "./sql";
@@ -259,6 +260,27 @@ describe("table/database lifecycle DDL", () => {
   it("buildCreateView qualifies the name and trims the SELECT", () => {
     expect(buildCreateView("postgres", "public", "v ", " SELECT 1 ")).toBe('CREATE VIEW "public"."v" AS\nSELECT 1;');
     expect(buildCreateView("mysql", "db", "v", "SELECT * FROM t")).toBe("CREATE VIEW `db`.`v` AS\nSELECT * FROM t;");
+  });
+});
+
+describe("formatSql", () => {
+  it("breaks before major clauses; indents AND/OR/ON", () => {
+    expect(formatSql("select a, b from t where x = 1 and y = 2 order by a")).toBe(
+      "select a, b\nfrom t\nwhere x = 1\n  and y = 2\norder by a",
+    );
+  });
+  it("keeps multi-word clauses together (group by / left join), no double break", () => {
+    expect(formatSql("select a from x left join y on x.id = y.xid group by a")).toBe(
+      "select a\nfrom x\nleft join y\n  on x.id = y.xid\ngroup by a",
+    );
+  });
+  it("never reformats inside string literals or comments (semantics-safe)", () => {
+    // 'from where' 為字串字面值，不可被換行；-- 註解原樣保留。
+    expect(formatSql("select 'from where and x' as c from t")).toBe("select 'from where and x' as c\nfrom t");
+    expect(formatSql("select 1 -- from where\nfrom t")).toBe("select 1 -- from where\nfrom t");
+  });
+  it("does not match keywords embedded in identifiers (from_date)", () => {
+    expect(formatSql("select from_date from t")).toBe("select from_date\nfrom t");
   });
 });
 

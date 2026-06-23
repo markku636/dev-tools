@@ -20,6 +20,7 @@ import {
   resultToTsv, resultToJson, resultToCsv, fmtElapsed, splitSqlStatements,
   quoteIdent, qualifiedName,
   buildDropTable, buildDropView, buildTruncateTable, buildRenameTable, buildDuplicateTable, isSystemDatabase,
+  formatSql,
 } from "./sql";
 import type { SavedQuery } from "./sql";
 
@@ -1302,6 +1303,13 @@ function QueryPane() {
                 </>
               )}
             </div>
+            {supportsExplain && (
+              <button type="button" onClick={() => persistSql(formatSql(sql))} disabled={running || !sql.trim()}
+                title="格式化 SQL：主要子句換行（僅調整字面值外空白，不改語意）"
+                className="text-xs px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/70 disabled:opacity-40">
+                ✨ 格式化
+              </button>
+            )}
             {supportsExplain && (
               <button type="button" onClick={() => execute("analyze")} disabled={running}
                 title="EXPLAIN：查看查詢執行計畫"

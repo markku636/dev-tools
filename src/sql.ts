@@ -108,6 +108,51 @@ export function buildCreateView(kind: DbKind, db: string, name: string, select: 
   return `CREATE VIEW ${qualifiedName(kind, db, name.trim())} AS\n${select.trim()};`;
 }
 
+// 保守 SQL 格式化：把語句切成「程式碼」與「逐字保留片段」（字串 '...'、識別字 "..."/`...`、
+// 行 / 區塊註解、PG $$），只對程式碼片段重排空白並於主要子句前換行。因僅變動字面值外的空白，
+// 不改變語意（SQL 對字面值外的空白不敏感），最差只是排版不美而非破壞查詢。不改關鍵字大小寫。
+export function formatSql(sql: string): string {
+  const segs: { code: boolean; v: string }[] = [];
+  let code = "";
+  let i = 0;
+  const n = sql.length;
+  const flush = () => { if (code) { segs.push({ code: true, v: code }); code = ""; } };
+  while (i < n) {
+    const ch = sql[i];
+    const two = sql.slice(i, i + 2);
+    if (ch === "'" || ch === '"' || ch === "`") {
+      flush();
+      let j = i + 1;
+      while (j < n) {
+        if (sql[j] === ch) { if (sql[j + 1] === ch) { j += 2; continue; } j++; break; }
+        j++;
+      }
+      segs.push({ code: false, v: sql.slice(i, j) });
+      i = j;
+      continue;
+    }
+    if (two === "--") { flush(); let j = i; while (j < n && sql[j] !== "\n") j++; segs.push({ code: false, v: sql.slice(i, j) }); i = j; continue; }
+    if (two === "/*") { flush(); let j = i + 2; while (j < n && sql.slice(j, j + 2) !== "*/") j++; j = Math.min(n, j + 2); segs.push({ code: false, v: sql.slice(i, j) }); i = j; continue; }
+    if (two === "$$") { flush(); let j = i + 2; while (j < n && sql.slice(j, j + 2) !== "$$") j++; j = Math.min(n, j + 2); segs.push({ code: false, v: sql.slice(i, j) }); i = j; continue; }
+    code += ch;
+    i++;
+  }
+  flush();
+
+  // 多字關鍵字（group by / left join…）整體比對，避免二次換行。
+  const CLAUSE = /\s*\b(select|from|where|group\s+by|order\s+by|having|limit|offset|union\s+all|union|values|inner\s+join|left\s+join|right\s+join|full\s+join|cross\s+join|join|set)\b/gi;
+  const out = segs
+    .map((s) => {
+      if (!s.code) return s.v;
+      let c = s.v.replace(/\s+/g, " ");
+      c = c.replace(CLAUSE, (_m, kw: string) => "\n" + kw.replace(/\s+/g, " "));
+      c = c.replace(/\s+\b(and|or|on)\b/gi, (_m, kw: string) => "\n  " + kw);
+      return c;
+    })
+    .join("");
+  return out.replace(/[ \t]+\n/g, "\n").replace(/^\s+/, "").trim();
+}
+
 // ---- 查詢歷史（localStorage，最近在前，去重，上限 50）----
 export const QUERY_HISTORY_KEY = "at-kit:queryHistory";
 const QUERY_HISTORY_CAP = 50;
