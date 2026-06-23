@@ -285,6 +285,13 @@ pub enum AlterOp {
     DropColumn { name: String },
     /// 改欄位名稱。
     RenameColumn { old: String, new: String },
+    /// 改欄位型別 / 可空。
+    ModifyColumn {
+        name: String,
+        data_type: String,
+        #[serde(default)]
+        nullable: bool,
+    },
 }
 
 /// ER 圖：欄位節點。

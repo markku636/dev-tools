@@ -506,6 +506,11 @@ impl DatabaseDriver for MysqlDriver {
                 quote_ident(old),
                 quote_ident(new)
             ),
+            AlterOp::ModifyColumn { name, data_type, nullable } => {
+                crate::db::validate_column_spec(data_type, None)?;
+                let nn = if *nullable { " NULL" } else { " NOT NULL" };
+                format!("ALTER TABLE {q_tbl} MODIFY COLUMN {} {data_type}{nn}", quote_ident(name))
+            }
         };
         sqlx::query(&ddl)
             .execute(&self.pool)

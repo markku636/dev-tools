@@ -680,6 +680,14 @@ async fn mysql_full() {
     // table_info：MySQL 應含「引擎」與「資料大小」等統計。
     let tinfo = d.table_info("testdb", "t").await.unwrap();
     assert!(tinfo.iter().any(|(k, _)| k == "引擎"), "MySQL table_info 應含引擎，實得：{tinfo:?}");
+    // ModifyColumn：改欄位型別（INT → VARCHAR）。
+    d.alter_table("testdb", "t", &AlterOp::AddColumn { name: "mc".into(), data_type: "INT".into(), nullable: true, default: None }).await.unwrap();
+    d.alter_table("testdb", "t", &AlterOp::ModifyColumn { name: "mc".into(), data_type: "VARCHAR(20)".into(), nullable: true }).await.unwrap();
+    assert!(
+        d.table_columns("testdb", "t").await.unwrap().iter().any(|c| c.name == "mc" && c.data_type.to_lowercase().contains("varchar")),
+        "MySQL 改型別後 mc 應為 varchar"
+    );
+    d.alter_table("testdb", "t", &AlterOp::DropColumn { name: "mc".into() }).await.unwrap();
 
     // 新增 / 刪除資料庫（CREATE / DROP DATABASE）→ 出現後消失。
     d.query("DROP DATABASE IF EXISTS atkit_newdb").await.unwrap();
@@ -935,6 +943,14 @@ async fn postgres_full() {
     // table_info：PG 應含「總大小」統計。
     let tinfo = d.table_info("public", "t").await.unwrap();
     assert!(tinfo.iter().any(|(k, _)| k == "總大小"), "PG table_info 應含總大小，實得：{tinfo:?}");
+    // ModifyColumn：改欄位型別（INT → text，含 USING 轉型）。
+    d.alter_table("public", "t", &AlterOp::AddColumn { name: "mc".into(), data_type: "INT".into(), nullable: true, default: None }).await.unwrap();
+    d.alter_table("public", "t", &AlterOp::ModifyColumn { name: "mc".into(), data_type: "text".into(), nullable: true }).await.unwrap();
+    assert!(
+        d.table_columns("public", "t").await.unwrap().iter().any(|c| c.name == "mc" && c.data_type.to_lowercase().contains("text")),
+        "PG 改型別後 mc 應為 text"
+    );
+    d.alter_table("public", "t", &AlterOp::DropColumn { name: "mc".into() }).await.unwrap();
 
     // 新增 / 刪除資料庫（PG → CREATE / DROP SCHEMA CASCADE）→ 出現後消失。
     d.query("DROP SCHEMA IF EXISTS atkit_newschema CASCADE").await.unwrap();

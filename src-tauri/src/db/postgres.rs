@@ -536,6 +536,15 @@ impl DatabaseDriver for PostgresDriver {
                 quote_ident(old),
                 quote_ident(new)
             ),
+            AlterOp::ModifyColumn { name, data_type, nullable } => {
+                crate::db::validate_column_spec(data_type, None)?;
+                // PG 型別轉換需 USING 轉型；一條 ALTER TABLE 內逗號串多個 ALTER COLUMN（型別 + 可空）。
+                let qc = quote_ident(name);
+                let null_clause = if *nullable { "DROP NOT NULL" } else { "SET NOT NULL" };
+                format!(
+                    "ALTER TABLE {q_tbl} ALTER COLUMN {qc} TYPE {data_type} USING {qc}::{data_type}, ALTER COLUMN {qc} {null_clause}"
+                )
+            }
         };
         sqlx::query(&ddl)
             .execute(&self.pool)

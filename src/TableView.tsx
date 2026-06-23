@@ -1734,6 +1734,12 @@ function StructurePane({ tab }: { tab: OpenTab }) {
     if (!(await uiConfirm(`刪除欄位「${name}」？此動作無法復原。`, { title: "刪除欄位", danger: true, confirmText: "刪除" }))) return;
     doAlter({ op: "drop_column", name }, "欄位已刪除");
   };
+  // 修改欄位型別（MySQL / PostgreSQL；SQLite 不支援）。保留目前可空性。
+  const modifyType = async (name: string, currentType: string, nullable: boolean) => {
+    const t = await uiPrompt("新型別", { title: `修改欄位「${name}」型別`, defaultValue: currentType, placeholder: "如 VARCHAR(100) / int / text" });
+    if (!t?.trim() || t.trim() === currentType) return;
+    doAlter({ op: "modify_column", name, data_type: t.trim(), nullable }, "欄位型別已修改");
+  };
 
   const dropIndexByName = async (name: string) => {
     if (!(await uiConfirm(`刪除索引「${name}」？`, { title: "刪除索引", danger: true, confirmText: "刪除" }))) return;
@@ -1830,6 +1836,11 @@ function StructurePane({ tab }: { tab: OpenTab }) {
                   <button type="button" title="改名" disabled={busy}
                     onClick={() => setRename({ col: c.name, to: c.name })}
                     className="px-1 text-white/20 group-hover:text-white/70 hover:bg-white/15 rounded disabled:opacity-40">✎</button>
+                  {kind !== "sqlite" && (
+                    <button type="button" title="修改型別" disabled={busy}
+                      onClick={() => modifyType(c.name, c.data_type, c.nullable)}
+                      className="px-1 text-white/20 group-hover:text-white/70 hover:bg-white/15 rounded disabled:opacity-40">型</button>
+                  )}
                   <button type="button" title="刪除欄位" disabled={busy}
                     onClick={() => dropCol(c.name)}
                     className="px-1 text-white/20 group-hover:text-red-400 hover:bg-red-500/20 rounded disabled:opacity-40">−</button>
