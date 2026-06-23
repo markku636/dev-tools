@@ -261,6 +261,14 @@ pub struct ServerInfoSection {
     pub items: Vec<(String, String)>,
 }
 
+/// 鍵名清單（供鍵樹建構）。純 SCAN 取名，不含 type/ttl。
+/// truncated 表示達到 limit 上限、可能仍有更多鍵未回。
+#[derive(Debug, Clone, Serialize)]
+pub struct RedisKeys {
+    pub keys: Vec<String>,
+    pub truncated: bool,
+}
+
 /// 欄位資料剖析（致敬 Navicat / DataGrip）：總列數 / 非空 / 相異值數 + 最小 / 最大（範圍）。
 /// min / max 為 best-effort：某些型別（如 JSON）不支援 MIN/MAX 時為 None。
 #[derive(Debug, Clone, Serialize, Default)]
@@ -602,6 +610,17 @@ pub trait DatabaseDriver: Send + Sync {
     /// 伺服器狀態（Redis INFO 等）。非鍵值型預設 Unsupported。
     async fn server_info(&self) -> AppResult<Vec<ServerInfoSection>> {
         Err(AppError::Unsupported("此資料庫不支援伺服器狀態".into()))
+    }
+
+    /// 鍵值型：列出符合 pattern 的鍵名（純 SCAN，供鍵樹建構）。
+    /// limit 為回傳上限。非鍵值型預設 Unsupported。
+    async fn scan_keys(
+        &self,
+        _database: &str,
+        _pattern: &str,
+        _limit: usize,
+    ) -> AppResult<RedisKeys> {
+        Err(AppError::Unsupported("此資料庫不支援鍵掃描".into()))
     }
 
     /// 優雅關閉：drain 連線池。

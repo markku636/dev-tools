@@ -86,6 +86,7 @@ pub fn run() {
             commands::drop_index,
             commands::create_index,
             commands::server_info,
+            commands::redis_keys,
             commands::backup_detect_cli,
             commands::backup_run,
             commands::backup_restore,

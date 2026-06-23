@@ -7,6 +7,7 @@ import { toast, uiConfirm, uiPrompt, copyToClipboard } from "./ui";
 import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
+import RedisKeyTree from "./RedisKeyTree";
 import { AlterOp } from "./api";
 
 const PAGE_SIZE = 100;
@@ -93,7 +94,17 @@ function DataPane({ tab }: { tab: OpenTab }) {
   const connKind = useStore((s) => s.connections.find((c) => c.id === tab.connId)?.kind);
   const isSqlKind = connKind === "mysql" || connKind === "postgres" || connKind === "sqlite";
   const [detailKey, setDetailKey] = useState<string | null>(null);
-  const [rowMenu, setRowMenu] = useState<{ r: number; key: string; ttl: string | null; x: number; y: number } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ key: string; ttl: string | null; x: number; y: number } | null>(null);
+  // Redis 鍵檢視模式：樹狀（命名空間資料夾）/ 網格（key 列表）。記憶於 localStorage。
+  const [redisView, setRedisView] = useState<"tree" | "grid">(() => {
+    try { return localStorage.getItem("at-kit:redisKeyView") === "grid" ? "grid" : "tree"; }
+    catch { return "tree"; }
+  });
+  const treeMode = isRedis && redisView === "tree";
+  const setRedisViewPersist = (v: "tree" | "grid") => {
+    setRedisView(v);
+    try { localStorage.setItem("at-kit:redisKeyView", v); } catch { /* 忽略 */ }
+  };
 
   // SQL 表的儲存格右鍵選單 / 內容檢視器 / 選取（鍵盤導覽）/「以此列為範本」預填值
   const [cellMenu, setCellMenu] = useState<{ r: number; c: number; x: number; y: number } | null>(null);
@@ -505,6 +516,9 @@ function DataPane({ tab }: { tab: OpenTab }) {
   };
 
   // ---- Redis 鍵列右鍵操作 ----
+  // 重整：遞增資料重載 nonce → 同時刷新網格（load 的 effect 依賴）與鍵樹（nonce prop）。
+  const refresh = () => useStore.getState().bumpDataReload(tab.connId, tab.database, tab.table);
+
   const renameKey = async (key: string) => {
     const nv = await uiPrompt("輸入新的鍵名：", {
       title: "重新命名鍵", defaultValue: key, confirmText: "重新命名",
@@ -515,9 +529,11 @@ function DataPane({ tab }: { tab: OpenTab }) {
     try {
       await api.keyEdit(tab.connId, tab.database, key, { action: "rename", new_key: nv });
       toast.success("已重新命名");
-      load();
+      refresh();
     } catch (e: any) {
-      setErr(e?.message ?? "重新命名失敗");
+      const msg = e?.message ?? "重新命名失敗";
+      setErr(msg);
+      toast.error(msg); // 樹狀模式未掛載網格的錯誤橫幅，改用 toast 確保可見
     } finally {
       setApplying(false);
     }
@@ -538,9 +554,29 @@ function DataPane({ tab }: { tab: OpenTab }) {
         pk_values: [key],
       });
       toast.success("已設定 TTL");
-      load();
+      refresh();
     } catch (e: any) {
-      setErr(e?.message ?? "設定 TTL 失敗");
+      const msg = e?.message ?? "設定 TTL 失敗";
+      setErr(msg);
+      toast.error(msg);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  // 依鍵名刪除（鍵樹與右鍵選單共用，不需網格列索引）。
+  const deleteKey = async (key: string) => {
+    if (!(await uiConfirm(`確定刪除鍵「${key}」？此動作無法復原。`, { title: "刪除鍵", danger: true, confirmText: "刪除" }))) return;
+    setApplying(true);
+    setErr(null);
+    try {
+      await api.deleteRow(tab.connId, tab.database, tab.table, { pk_columns: ["key"], pk_values: [key] });
+      toast.success("已刪除");
+      refresh();
+    } catch (e: any) {
+      const msg = e?.message ?? "刪除失敗";
+      setErr(msg);
+      toast.error(msg);
     } finally {
       setApplying(false);
     }
@@ -579,6 +615,21 @@ function DataPane({ tab }: { tab: OpenTab }) {
     <div className="flex-1 flex flex-col min-h-0">
       {/* 動作列：重新整理 + 篩選切換 + 新增列 */}
       <div className="flex items-center gap-1 px-2 py-1 bg-[#10161e] border-b border-white/10 text-xs">
+        {isRedis && (
+          <div className="flex items-center rounded border border-white/10 overflow-hidden mr-1">
+            {(["tree", "grid"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setRedisViewPersist(v)}
+                title={v === "tree" ? "命名空間樹狀檢視（依 : 分組）" : "鍵列表（網格）"}
+                className={`px-2 py-1 ${redisView === v ? "bg-white/15 text-white" : "text-white/50 hover:bg-white/5"}`}
+              >
+                {v === "tree" ? "🌲 樹狀" : "▦ 網格"}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           onClick={async () => {
             if (dirtyCount > 0 && !(await uiConfirm("有未套用的變更，重新整理將放棄。確定？", { title: "放棄變更", danger: true, confirmText: "放棄並重整" }))) return;
@@ -662,6 +713,17 @@ function DataPane({ tab }: { tab: OpenTab }) {
         />
       )}
 
+      {treeMode ? (
+        <RedisKeyTree
+          key={`${tab.connId}:${tab.database}`}
+          connId={tab.connId}
+          database={tab.database}
+          nonce={reloadNonce}
+          onOpenKey={(k) => setDetailKey(k)}
+          onContextKey={(k, x, y) => setRowMenu({ key: k, ttl: null, x, y })}
+        />
+      ) : (
+      <>
       <div className="at-grid flex-1 overflow-auto outline-none" tabIndex={0} onKeyDown={onGridKey}>
         {err && <div className="p-3 text-red-400 text-sm mono">{err}</div>}
         {data && data.columns.length > 0 && (
@@ -721,7 +783,6 @@ function DataPane({ tab }: { tab: OpenTab }) {
                     if (key == null) return;
                     e.preventDefault();
                     setRowMenu({
-                      r: i,
                       key,
                       ttl: ttlIdx >= 0 ? row[ttlIdx] : null,
                       x: e.clientX,
@@ -878,6 +939,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
             : ""}
         </span>
       </div>
+      </>
+      )}
 
       {inserting && data && (
         <InsertDialog
@@ -915,7 +978,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
           database={tab.database}
           table={tab.table}
           rkey={detailKey}
-          onClose={() => { setDetailKey(null); load(); }}
+          onClose={() => { setDetailKey(null); refresh(); }}
         />
       )}
 
@@ -932,7 +995,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
                 ["複製鍵名", () => copyToClipboard(rowMenu.key, "已複製鍵名"), false],
                 ["重新命名…", () => renameKey(rowMenu.key), false],
                 ["設定 TTL…", () => setKeyTtl(rowMenu.key, rowMenu.ttl), false],
-                ["刪除", () => deleteRow(rowMenu.r), true],
+                ["刪除", () => deleteKey(rowMenu.key), true],
               ] as [string, () => void, boolean][]
             ).map(([label, fn, danger]) => (
               <button key={label} type="button"
@@ -1825,6 +1888,11 @@ function StructurePane({ tab }: { tab: OpenTab }) {
             title="檢視 / 複製建表 SQL（CREATE 語句）"
             className="px-2 py-1 rounded hover:bg-white/10 text-white/60">
             📋 建表 SQL
+          </button>
+          <button type="button" onClick={() => setNonce((n) => n + 1)} disabled={busy}
+            title="重新讀取結構（外部變更後同步）"
+            className="px-2 py-1 rounded hover:bg-white/10 text-white/60 disabled:opacity-40">
+            ⟳ 重新整理
           </button>
           {busy && <span className="text-white/40">處理中…</span>}
         </div>

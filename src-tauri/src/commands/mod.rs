@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 use crate::backup::{self, BackupResult};
 use crate::db::{
     AlterOp, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, ErModel, KeyDetail, KeyEdit,
-    ForeignKeyInfo, PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert,
+    ForeignKeyInfo, PagedData, PoolStatus, QueryResult, RedisKeys, RoutineInfo, RowDelete, RowInsert,
     ServerInfoSection, TableInfo,
 };
 use crate::error::{AppError, AppResult};
@@ -416,6 +416,17 @@ pub async fn server_info(
     id: String,
 ) -> AppResult<Vec<ServerInfoSection>> {
     state.manager.server_info(&id).await
+}
+
+#[tauri::command]
+pub async fn redis_keys(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    pattern: String,
+    limit: usize,
+) -> AppResult<RedisKeys> {
+    state.manager.scan_keys(&id, &database, &pattern, limit).await
 }
 
 // ---- 資料匯出 ----

@@ -10,8 +10,8 @@ use crate::db::redis::RedisDriver;
 use crate::db::sqlite::SqliteDriver;
 use crate::db::{
     AlterOp, CellEdit, ColumnInfo, ColumnStats, ConnectionConfig, DataQuery, DatabaseDriver, DbKind,
-    ErModel, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RoutineInfo,
-    RowDelete, RowInsert, ServerInfoSection, TableInfo,
+    ErModel, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RedisKeys,
+    RoutineInfo, RowDelete, RowInsert, ServerInfoSection, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::ssh::TunnelGuard;
@@ -314,6 +314,15 @@ impl Active {
             Active::Sqlite(d) => d.server_info().await,
             Active::Mongo(d) => d.server_info().await,
             Active::Redis(d) => d.server_info().await,
+        }
+    }
+    async fn scan_keys(&self, database: &str, pattern: &str, limit: usize) -> AppResult<RedisKeys> {
+        match self {
+            Active::Mysql(d) => d.scan_keys(database, pattern, limit).await,
+            Active::Postgres(d) => d.scan_keys(database, pattern, limit).await,
+            Active::Sqlite(d) => d.scan_keys(database, pattern, limit).await,
+            Active::Mongo(d) => d.scan_keys(database, pattern, limit).await,
+            Active::Redis(d) => d.scan_keys(database, pattern, limit).await,
         }
     }
     async fn close(&self) {
@@ -631,6 +640,16 @@ impl ConnectionManager {
 
     pub async fn server_info(&self, id: &str) -> AppResult<Vec<ServerInfoSection>> {
         self.get(id)?.active.server_info().await
+    }
+
+    pub async fn scan_keys(
+        &self,
+        id: &str,
+        database: &str,
+        pattern: &str,
+        limit: usize,
+    ) -> AppResult<RedisKeys> {
+        self.get(id)?.active.scan_keys(database, pattern, limit).await
     }
 
     /// 主動關閉並移除單一連線（含其 tunnel）。

@@ -2,7 +2,8 @@ use redis::AsyncCommands;
 
 use crate::db::{
     CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, KeyDetail, KeyEdit,
-    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, ServerInfoSection, TableInfo,
+    PagedData, PoolStatus, QueryResult, RedisKeys, RowDelete, RowInsert, ServerInfoSection,
+    TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -219,14 +220,16 @@ impl DatabaseDriver for RedisDriver {
             }
             _ => ("0".to_string(), sql.trim()),
         };
-        let parts: Vec<&str> = cmdline.split_whitespace().collect();
+        // 以 redis-cli 風格切詞（支援單 / 雙引號與雙引號內的 \ 轉義），
+        // 才能輸入含空白的值，如 SET k "hello world"。
+        let parts = split_args(cmdline);
         if parts.is_empty() {
             return Err(AppError::Query("空命令".to_string()));
         }
         let mut conn = self.conn(&db).await?;
-        let mut cmd = redis::cmd(parts[0]);
+        let mut cmd = redis::cmd(&parts[0]);
         for p in &parts[1..] {
-            cmd.arg(*p);
+            cmd.arg(p.as_str());
         }
         // 以通用 Value 取回，轉成字串列。
         let val: redis::Value = cmd
@@ -516,6 +519,53 @@ impl DatabaseDriver for RedisDriver {
         Ok(parse_info(&raw))
     }
 
+    async fn scan_keys(
+        &self,
+        database: &str,
+        pattern: &str,
+        limit: usize,
+    ) -> AppResult<RedisKeys> {
+        let limit = limit.max(1);
+        let pattern = if pattern.is_empty() { "*" } else { pattern };
+        let mut conn = self.conn(database).await?;
+
+        // 邊掃邊去重（SCAN 在 rehash 期間可能重複回傳同一 key），
+        // 截斷判斷一律以「唯一鍵數」為準，避免重複灌水誤判截斷或漏掃。
+        // BTreeSet 同時保證輸出已排序。
+        let mut set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut cursor: u64 = 0;
+        let mut truncated = false;
+        loop {
+            let (next, batch): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(pattern)
+                .arg("COUNT")
+                .arg(1000)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| AppError::Query(e.to_string()))?;
+            set.extend(batch);
+            cursor = next;
+            // 掃完一輪即停（最精確的「沒有更多」訊號）；此時不算截斷。
+            if cursor == 0 {
+                break;
+            }
+            // 唯一鍵數達上限且仍有游標 → 確實還有更多鍵，標記截斷後停掃。
+            if set.len() >= limit {
+                truncated = true;
+                break;
+            }
+        }
+
+        let mut keys: Vec<String> = set.into_iter().collect();
+        if keys.len() > limit {
+            keys.truncate(limit);
+            truncated = true;
+        }
+        Ok(RedisKeys { keys, truncated })
+    }
+
     async fn close(&self) {
         // redis Client 無顯式 close；連線於 drop 時釋放。
     }
@@ -562,6 +612,71 @@ fn parse_info(raw: &str) -> Vec<ServerInfoSection> {
         }
     }
     sections
+}
+
+/// redis-cli 風格的命令列切詞：以空白分隔；支援單引號（字面）、
+/// 雙引號（內部 \ 轉義 \n \t \r \" \\ 等），引號區段可與相鄰字元相接。
+/// 例：`SET k "hello world"` → ["SET", "k", "hello world"]。
+fn split_args(line: &str) -> Vec<String> {
+    enum Q {
+        None,
+        Single,
+        Double,
+    }
+    let mut args: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_arg = false;
+    let mut q = Q::None;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match q {
+            Q::None => {
+                if c.is_whitespace() {
+                    if in_arg {
+                        args.push(std::mem::take(&mut cur));
+                        in_arg = false;
+                    }
+                } else if c == '"' {
+                    in_arg = true;
+                    q = Q::Double;
+                } else if c == '\'' {
+                    in_arg = true;
+                    q = Q::Single;
+                } else {
+                    in_arg = true;
+                    cur.push(c);
+                }
+            }
+            Q::Double => {
+                if c == '\\' {
+                    if let Some(&n) = chars.peek() {
+                        chars.next();
+                        cur.push(match n {
+                            'n' => '\n',
+                            't' => '\t',
+                            'r' => '\r',
+                            other => other,
+                        });
+                    }
+                } else if c == '"' {
+                    q = Q::None;
+                } else {
+                    cur.push(c);
+                }
+            }
+            Q::Single => {
+                if c == '\'' {
+                    q = Q::None;
+                } else {
+                    cur.push(c);
+                }
+            }
+        }
+    }
+    if in_arg {
+        args.push(cur);
+    }
+    args
 }
 
 /// 將 redis::Value 攤平成單欄字串列。

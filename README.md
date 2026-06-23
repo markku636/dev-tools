@@ -5,7 +5,8 @@
 採用 **Tauri (Rust) + React + TypeScript**，輕量、高效、安全。
 
 > 目前進度：**五大資料庫全部可連線**；關聯式完整 CRUD / DDL 欄位編輯 / 索引管理 / EXPLAIN / RETURNING 顯示、多欄複合篩選（9 種運算子 + AND·OR）排序、**CSV 匯入** + 多格式匯出 + **轉儲整庫結構 SQL**
-> MongoDB 文件攤平 + 查詢編輯器完整 **CRUD-via-JSON**（find / 聚合 aggregate / insert / update / delete）+ 索引管理、Redis 五種結構**檢視＋編輯** + 改名 / 刪除
+> MongoDB 文件攤平 + 查詢編輯器完整 **CRUD-via-JSON**（find / 聚合 aggregate / insert / update / delete）+ 索引管理
+> Redis 仿 **Another Redis Desktop Manager**：五種結構檢視＋編輯、**命名空間鍵樹**（依 `:` 分組資料夾）、鍵列右鍵（檢視 / 複製鍵名 / 改名 / 設 TTL / 刪除）、DB 右鍵（新增鍵 / 清空 DB / 伺服器狀態 / 命令列）、**伺服器狀態面板**（INFO 重點指標 + 全分區，可自動刷新）、**命令列 Console**（指令歷史、DB 切換）
 > 連線設定持久化（密碼存 OS keychain）、SSH Tunnel、排程備份 + 備份歷史、Ping 連線延遲、ER 圖、欄寬可拖曳
 > 可實際連線：**MySQL · PostgreSQL · SQLite · MongoDB · Redis**
 
@@ -22,6 +23,7 @@
 - [x] 篩選（單欄條件）、排序（點欄位標題）
 - [x] MongoDB（文件攤平成表格，沿用表格手感）
 - [x] Redis（key 列表化 + 五種結構檢視）
+- [x] Redis 強化（仿 Another Redis）：命名空間鍵樹（`:` 分組）、鍵列 / DB / 連線右鍵選單、伺服器狀態（INFO）面板、命令列 Console
 - [x] 備份 / 還原（手動，CLI 為主 + SQLite 檔案複製）
 - [x] 連線設定持久化 + 密碼 OS keychain 加密
 - [x] SSH Tunnel（密碼 / 私鑰認證）

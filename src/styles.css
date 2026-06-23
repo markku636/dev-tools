@@ -103,3 +103,99 @@ option {
   background: #1a212b;
   color: #e6e6e6;
 }
+
+/* ---- 開場動畫（啟動時的品牌動態）---- */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(120% 90% at 50% 38%, #1b2433 0%, #0f1419 60%, #0a0e13 100%);
+  overflow: hidden;
+}
+/* 整體淡出後解除掛載。 */
+.splash--leaving {
+  animation: splash-fade-out 0.55s ease forwards;
+}
+.splash__stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 標誌後方的柔光暈，呼吸式脈動。 */
+.splash__glow {
+  position: absolute;
+  width: 130%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(59,130,246,0.35) 0%, rgba(249,115,22,0.12) 40%, transparent 70%);
+  filter: blur(14px);
+  opacity: 0;
+  animation: splash-glow 2.6s ease-in-out 0.15s infinite;
+}
+/* 標誌進場：淡入 + 帶回彈的縮放，落定後輕微浮動。 */
+.splash__logo {
+  position: relative;
+  width: min(46vw, 440px);
+  max-width: 80vw;
+  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.55));
+  opacity: 0;
+  transform: scale(0.8) translateY(12px);
+  animation:
+    splash-pop 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards,
+    splash-float 3.4s ease-in-out 0.9s infinite;
+}
+/* 由標誌掃過的高光，依標誌輪廓裁切（CSS mask），增添「魔法」感。 */
+.splash__logo-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.splash__shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.6) 50%, transparent 60%);
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  -webkit-mask: var(--logo-src) center / contain no-repeat;
+          mask: var(--logo-src) center / contain no-repeat;
+  opacity: 0;
+  animation: splash-shine 1.6s ease 0.7s 1 forwards;
+  pointer-events: none;
+}
+
+@keyframes splash-pop {
+  0%   { opacity: 0; transform: scale(0.8) translateY(12px); }
+  60%  { opacity: 1; transform: scale(1.045) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes splash-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-9px); }
+}
+@keyframes splash-glow {
+  0%, 100% { opacity: 0.45; transform: scale(0.94); }
+  50%      { opacity: 0.9;  transform: scale(1.04); }
+}
+@keyframes splash-shine {
+  0%   { opacity: 0; background-position: 165% 0; }
+  30%  { opacity: 1; }
+  100% { opacity: 0; background-position: -65% 0; }
+}
+@keyframes splash-fade-out {
+  to { opacity: 0; visibility: hidden; }
+}
+
+/* 尊重「減少動態效果」偏好：仍顯示標誌，但去除動畫。 */
+@media (prefers-reduced-motion: reduce) {
+  .splash__logo,
+  .splash__glow,
+  .splash__shine {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

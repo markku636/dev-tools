@@ -202,6 +202,12 @@ export interface ServerInfoSection {
   items: [string, string][];
 }
 
+// Redis 鍵名清單（供鍵樹建構）。truncated 表示達上限、可能仍有更多鍵。
+export interface RedisKeys {
+  keys: string[];
+  truncated: boolean;
+}
+
 export interface BackupResult {
   path: string;
   bytes: number;
@@ -332,6 +338,8 @@ export const api = {
     invoke<void>("create_index", { id, database, table, name, columns, unique }),
   serverInfo: (id: string) =>
     invoke<ServerInfoSection[]>("server_info", { id }),
+  redisKeys: (id: string, database: string, pattern: string, limit: number) =>
+    invoke<RedisKeys>("redis_keys", { id, database, pattern, limit }),
   backupDetectCli: (kind: DbKind) =>
     invoke<boolean>("backup_detect_cli", { kind }),
   backupRun: (config: ConnectionConfig, database: string, outPath: string) =>

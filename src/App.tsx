@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ConnectionConfig, DbKind, KIND_META, PoolStatus, QueryResult, TableInfo } from "./api";
 import { useStore } from "./store";
 import ConnectionDialog from "./ConnectionDialog";
@@ -6,6 +6,7 @@ import TableView, { CellInspector } from "./TableView";
 import BackupDialog from "./BackupDialog";
 import ErDiagram from "./ErDiagram";
 import RedisStatus from "./RedisStatus";
+import RedisConsole from "./RedisConsole";
 import NewKeyDialog from "./NewKeyDialog";
 import CreateTableDialog from "./CreateTableDialog";
 import ConnectionProperties from "./ConnectionProperties";
@@ -25,6 +26,8 @@ import {
   formatSql,
 } from "./sql";
 import type { SavedQuery } from "./sql";
+import logoMark from "./assets/logo-mark.png";
+import connectIcon from "./assets/connect-icon.png";
 
 export default function App() {
   // null = 關閉；{ initial } = 開啟（initial 為 null 表新增、為連線表示編輯）
@@ -32,6 +35,11 @@ export default function App() {
   const [backupOpen, setBackupOpen] = useState(false);
   const [erOpen, setErOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // 開場動畫狀態：show → leaving（淡出）→ done（卸載）。每次啟動只播一次。
+  const [splash, setSplash] = useState<"show" | "leaving" | "done">(() => {
+    try { return sessionStorage.getItem("atkit:splashed") ? "done" : "show"; }
+    catch { return "show"; }
+  });
   const { connections, connectedIds, activeId } = useStore();
   const activeConn = connections.find((c) => c.id === activeId) ?? null;
   // ER 圖僅關聯式（MySQL / PostgreSQL / SQLite）支援外鍵關係；Mongo / Redis 不適用。
@@ -59,8 +67,24 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // 開場動畫顯示約 2.2s 後開始淡出（淡出結束由 SplashScreen 回呼卸載）。
+  useEffect(() => {
+    if (splash !== "show") return;
+    const t = setTimeout(() => setSplash("leaving"), 2200);
+    return () => clearTimeout(t);
+  }, [splash]);
+
   return (
     <div className="h-full flex flex-col">
+      {splash !== "done" && (
+        <SplashScreen
+          leaving={splash === "leaving"}
+          onDone={() => {
+            try { sessionStorage.setItem("atkit:splashed", "1"); } catch {}
+            setSplash("done");
+          }}
+        />
+      )}
       <Toolbar
         onNewConnection={() => setDialog({ initial: null })}
         onBackup={() => activeConn && setBackupOpen(true)}
@@ -131,6 +155,25 @@ export default function App() {
   }
 }
 
+// ---- 開場動畫：去背標誌進場 + 柔光暈 + 輪廓高光掃過，隨後淡出 ----
+function SplashScreen({ leaving, onDone }: { leaving: boolean; onDone: () => void }) {
+  return (
+    <div
+      className={`splash${leaving ? " splash--leaving" : ""}`}
+      onAnimationEnd={(e) => { if (e.animationName === "splash-fade-out") onDone(); }}
+      aria-hidden
+    >
+      <div className="splash__stage">
+        <div className="splash__glow" />
+        <div className="splash__logo-wrap" style={{ ["--logo-src" as string]: `url(${logoMark})` }}>
+          <img src={logoMark} alt="MAGIDB Connect" className="splash__logo" draggable={false} />
+          <div className="splash__shine" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 連線池即時狀態徽章（每 4 秒輪詢 `pool_status`，呼應規劃 3.5 的連線生命週期監控）。
 function PoolStatusBadge({ connId }: { connId: string }) {
   const [pool, setPool] = useState<PoolStatus | null>(null);
@@ -184,8 +227,11 @@ function Toolbar({ onNewConnection, onBackup, canBackup, onEr, canEr, onHelp }: 
   canEr: boolean;
   onHelp: () => void;
 }) {
-  const tools = [
-    { icon: "🔌", label: "連線", onClick: onNewConnection, disabled: false },
+  const tools: { icon: ReactNode; label: string; onClick: () => void; disabled: boolean }[] = [
+    {
+      icon: <img src={connectIcon} alt="" draggable={false} className="w-7 h-7 object-contain -my-1 drop-shadow" />,
+      label: "連線", onClick: onNewConnection, disabled: false,
+    },
     { icon: "🗺", label: "ER 圖", onClick: onEr, disabled: !canEr },
     { icon: "💾", label: "備份", onClick: onBackup, disabled: !canBackup },
     { icon: "⌨", label: "快捷鍵", onClick: onHelp, disabled: false },
@@ -277,6 +323,8 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
   const [dbMenu, setDbMenu] = useState<{ connId: string; db: string; x: number; y: number } | null>(null);
   // Redis 伺服器狀態面板
   const [status, setStatus] = useState<{ id: string; name: string } | null>(null);
+  // Redis 命令列
+  const [console_, setConsole] = useState<{ id: string; name: string; db: string } | null>(null);
   // 新增 Redis 鍵對話框
   const [newKey, setNewKey] = useState<{ connId: string; db: string } | null>(null);
   // 設計表結構（CREATE TABLE）對話框：帶連線 / 資料庫 / 種類。
@@ -748,7 +796,10 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                   ? [["重新整理資料庫", () => refreshDbs(menu.id), false] as [string, () => void, boolean]]
                   : []),
                 ...(connectedIds.has(menu.id) && menuConn.kind === "redis"
-                  ? [["伺服器狀態", () => setStatus({ id: menuConn.id, name: menuConn.name }), false] as [string, () => void, boolean]]
+                  ? [
+                      ["伺服器狀態", () => setStatus({ id: menuConn.id, name: menuConn.name }), false] as [string, () => void, boolean],
+                      ["命令列", () => setConsole({ id: menuConn.id, name: menuConn.name, db: "0" }), false] as [string, () => void, boolean],
+                    ]
                   : []),
                 ...(connectedIds.has(menu.id) && (menuConn.kind === "mysql" || menuConn.kind === "postgres")
                   ? [
@@ -801,6 +852,7 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                   ? [
                       ["新增鍵…", () => setNewKey({ connId: dbMenu.connId, db: dbMenu.db }), false],
                       ["伺服器狀態", () => { if (dbConn) setStatus({ id: dbConn.id, name: dbConn.name }); }, false],
+                      ["命令列", () => { if (dbConn) setConsole({ id: dbConn.id, name: dbConn.name, db: dbMenu.db }); }, false],
                       ["編輯屬性…", editConn, false],
                       ["清空 DB（FLUSHDB）", () => flushDb(dbMenu.connId, dbMenu.db), true],
                     ]
@@ -908,6 +960,15 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
 
       {status && (
         <RedisStatus connId={status.id} connName={status.name} onClose={() => setStatus(null)} />
+      )}
+
+      {console_ && (
+        <RedisConsole
+          connId={console_.id}
+          connName={console_.name}
+          initialDb={console_.db}
+          onClose={() => setConsole(null)}
+        />
       )}
 
       {newKey && (
