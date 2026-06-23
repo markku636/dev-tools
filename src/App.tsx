@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ConnectionConfig, DbKind, KIND_META, PoolStatus, QueryResult, TableInfo } from "./api";
 import { useStore } from "./store";
 import ConnectionDialog from "./ConnectionDialog";
@@ -1456,21 +1456,42 @@ function ResultTable({ result }: { result: QueryResult }) {
     );
   }
 
-  // 大結果集只渲染前 N 列，避免數萬列 DOM 卡死 UI；複製 / 匯出仍取全部（用 result.rows）。
-  const MAX_RENDER = 2000;
-  const rendered = result.rows.length > MAX_RENDER ? result.rows.slice(0, MAX_RENDER) : result.rows;
+  // 點欄位標題做 client-side 排序（asc → desc → 無）；數字欄以數值比較，NULL 最後。
+  const [sort, setSort] = useState<{ c: number; dir: "asc" | "desc" } | null>(null);
+  const sortedRows = useMemo(() => {
+    if (!sort) return result.rows;
+    const { c, dir } = sort;
+    const f = dir === "asc" ? 1 : -1;
+    return [...result.rows].sort((ra, rb) => {
+      const a = ra[c];
+      const b = rb[c];
+      if (a === null && b === null) return 0;
+      if (a === null) return 1; // NULL 排最後（不受方向影響）
+      if (b === null) return -1;
+      const na = Number(a);
+      const nb = Number(b);
+      const bothNum = a !== "" && b !== "" && !Number.isNaN(na) && !Number.isNaN(nb);
+      return (bothNum ? na - nb : a < b ? -1 : a > b ? 1 : 0) * f;
+    });
+  }, [result.rows, sort]);
 
-  const cell = (r: number, c: number) => result.rows[r]?.[c] ?? null;
+  // 大結果集只渲染前 N 列，避免數萬列 DOM 卡死 UI；複製 / 匯出仍取全部。
+  const MAX_RENDER = 2000;
+  const rendered = sortedRows.length > MAX_RENDER ? sortedRows.slice(0, MAX_RENDER) : sortedRows;
+
+  const cell = (r: number, c: number) => sortedRows[r]?.[c] ?? null;
   const copyCell = (r: number, c: number) => copyToClipboard(cell(r, c) ?? "", "已複製儲存格");
   const copyRowTsv = (r: number) =>
-    copyToClipboard(result.rows[r].map((v) => v ?? "").join("\t"), "已複製整列 (TSV)");
+    copyToClipboard(sortedRows[r].map((v) => v ?? "").join("\t"), "已複製整列 (TSV)");
   const copyRowJson = (r: number) =>
     copyToClipboard(
-      JSON.stringify(Object.fromEntries(result.columns.map((c, j) => [c, result.rows[r][j] ?? null])), null, 2),
+      JSON.stringify(Object.fromEntries(result.columns.map((c, j) => [c, sortedRows[r][j] ?? null])), null, 2),
       "已複製整列 (JSON)"
     );
   const copyCol = (c: number) =>
-    copyToClipboard(result.rows.map((row) => row[c] ?? "").join("\n"), "已複製整欄");
+    copyToClipboard(sortedRows.map((row) => row[c] ?? "").join("\n"), "已複製整欄");
+  const toggleSort = (ci: number) =>
+    setSort((s) => (s?.c === ci ? (s.dir === "asc" ? { c: ci, dir: "desc" } : null) : { c: ci, dir: "asc" }));
 
   const onKey = (e: React.KeyboardEvent) => {
     if (!selected) return;
@@ -1486,9 +1507,11 @@ function ResultTable({ result }: { result: QueryResult }) {
         <thead className="sticky top-0 bg-[#1a212b]">
           <tr>
             <th className="text-left px-3 py-1.5 border-b border-white/10 text-white/30 w-12">#</th>
-            {result.columns.map((c) => (
-              <th key={c} className="text-left px-3 py-1.5 border-b border-white/10 font-medium whitespace-nowrap">
+            {result.columns.map((c, ci) => (
+              <th key={c} onClick={() => toggleSort(ci)} title="點擊排序（再點切換 / 取消）"
+                className="text-left px-3 py-1.5 border-b border-white/10 font-medium whitespace-nowrap cursor-pointer select-none hover:bg-white/5">
                 {c}
+                {sort?.c === ci && <span className="ml-1 text-amber-300 text-[10px]">{sort.dir === "asc" ? "▲" : "▼"}</span>}
               </th>
             ))}
           </tr>
