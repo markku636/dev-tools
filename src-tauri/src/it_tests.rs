@@ -550,6 +550,22 @@ async fn column_stats_counts() {
     assert_eq!(st.distinct, 2, "相異值數（a, b）");
     assert_eq!(st.min.as_deref(), Some("a"), "最小值");
     assert_eq!(st.max.as_deref(), Some("b"), "最大值");
+
+    // SQLite 觸發器（exec_ddl 簡單協定處理內部 ;）+ list / definition。
+    mgr.exec_ddl(id, "CREATE TRIGGER s_trg AFTER INSERT ON s BEGIN SELECT 1; END").await.unwrap();
+    let rs = mgr.list_routines(id, "main").await.unwrap();
+    assert!(
+        rs.iter().any(|r| r.name == "s_trg" && r.routine_type == "trigger" && r.parent.as_deref() == Some("s")),
+        "SQLite 觸發器應出現且帶所屬表，實得：{rs:?}"
+    );
+    let tdef = mgr.routine_definition(id, "main", "s_trg", "trigger").await.unwrap();
+    assert!(tdef.contains("s_trg"), "觸發器定義應含名稱");
+    mgr.exec_ddl(id, "DROP TRIGGER s_trg").await.unwrap();
+    assert!(
+        !mgr.list_routines(id, "main").await.unwrap().iter().any(|r| r.name == "s_trg"),
+        "刪除後觸發器應消失"
+    );
+
     mgr.disconnect(id).await;
     let _ = std::fs::remove_file(dbfile);
 }
@@ -672,6 +688,32 @@ async fn mysql_full() {
     assert!(d.drop_database("mysql").await.is_err(), "系統庫 mysql 不可刪除");
     assert!(d.drop_database("information_schema").await.is_err(), "系統庫 information_schema 不可刪除");
     assert!(d.drop_database("testdb").await.is_err(), "使用中的預設庫不可刪除");
+
+    // 預存程序（exec_ddl 走簡單查詢協定，驗證 prepared 不支援的 CREATE PROCEDURE 可建立）。
+    d.exec_ddl("DROP PROCEDURE IF EXISTS atkit_p1").await.unwrap();
+    d.exec_ddl("CREATE PROCEDURE atkit_p1() BEGIN SELECT 1; END").await.unwrap();
+    let routines = d.list_routines("testdb").await.unwrap();
+    assert!(
+        routines.iter().any(|r| r.name == "atkit_p1" && r.routine_type == "procedure"),
+        "新增的預存程序應出現，實得：{routines:?}"
+    );
+    let pdef = d.routine_definition("testdb", "atkit_p1", "procedure").await.unwrap();
+    assert!(pdef.to_uppercase().contains("PROCEDURE"), "程序定義應含 PROCEDURE");
+    d.exec_ddl("DROP PROCEDURE atkit_p1").await.unwrap();
+    assert!(
+        !d.list_routines("testdb").await.unwrap().iter().any(|r| r.name == "atkit_p1"),
+        "刪除後程序應消失"
+    );
+    // 觸發器（附所屬資料表）。
+    d.query("DROP TABLE IF EXISTS atkit_trg_t").await.unwrap();
+    d.query("CREATE TABLE atkit_trg_t (id INT)").await.unwrap();
+    d.exec_ddl("CREATE TRIGGER atkit_trg BEFORE INSERT ON atkit_trg_t FOR EACH ROW SET NEW.id = NEW.id + 1").await.unwrap();
+    assert!(
+        d.list_routines("testdb").await.unwrap().iter().any(|r| r.name == "atkit_trg" && r.parent.as_deref() == Some("atkit_trg_t")),
+        "觸發器應出現且帶所屬表"
+    );
+    d.exec_ddl("DROP TRIGGER atkit_trg").await.unwrap();
+    d.query("DROP TABLE atkit_trg_t").await.unwrap();
 
     // 建表 DDL + 索引（驗證本次新增的 table_ddl / table_indexes）
     let ddl = d.table_ddl("testdb", "t").await.unwrap();
@@ -897,6 +939,21 @@ async fn postgres_full() {
     // 安全護欄：系統 schema（pg_*、information_schema）不可刪除。
     assert!(d.drop_database("pg_catalog").await.is_err(), "系統 schema pg_catalog 不可刪除");
     assert!(d.drop_database("information_schema").await.is_err(), "系統 schema information_schema 不可刪除");
+
+    // 函式（exec_ddl 簡單協定處理 $$ dollar-quoting）+ list / definition。
+    d.exec_ddl("DROP FUNCTION IF EXISTS atkit_fn(int)").await.unwrap();
+    d.exec_ddl("CREATE OR REPLACE FUNCTION atkit_fn(p int) RETURNS int LANGUAGE plpgsql AS $$ BEGIN RETURN p + 1; END; $$").await.unwrap();
+    assert!(
+        d.list_routines("public").await.unwrap().iter().any(|r| r.name == "atkit_fn" && r.routine_type == "function"),
+        "PG 函式應出現於清單"
+    );
+    let fdef = d.routine_definition("public", "atkit_fn", "function").await.unwrap();
+    assert!(fdef.contains("atkit_fn"), "PG 函式定義應含函式名");
+    d.exec_ddl("DROP FUNCTION atkit_fn(int)").await.unwrap();
+    assert!(
+        !d.list_routines("public").await.unwrap().iter().any(|r| r.name == "atkit_fn"),
+        "刪除後 PG 函式應消失"
+    );
 
     // 建表 DDL（欄位重建）+ 索引（pg_index）
     let ddl = d.table_ddl("public", "t").await.unwrap();

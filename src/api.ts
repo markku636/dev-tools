@@ -58,6 +58,12 @@ export interface IndexInfo {
   primary: boolean;
 }
 
+export interface RoutineInfo {
+  name: string;
+  routine_type: string; // "procedure" | "function" | "trigger"
+  parent: string | null; // 觸發器所屬資料表
+}
+
 export interface PagedData {
   columns: string[];
   rows: (string | null)[][];
@@ -282,6 +288,11 @@ export const api = {
   dropCollection: (id: string, database: string, name: string) =>
     invoke<void>("drop_collection", { id, database, name }),
   dropDatabase: (id: string, name: string) => invoke<void>("drop_database", { id, name }),
+  listRoutines: (id: string, database: string) =>
+    invoke<RoutineInfo[]>("list_routines", { id, database }),
+  routineDefinition: (id: string, database: string, name: string, routineType: string) =>
+    invoke<string>("routine_definition", { id, database, name, routineType }),
+  execDdl: (id: string, sql: string) => invoke<void>("exec_ddl", { id, sql }),
   keyDetail: (id: string, database: string, key: string) =>
     invoke<KeyDetail | null>("key_detail", { id, database, key }),
   keyEdit: (id: string, database: string, key: string, edit: KeyEdit) =>

@@ -10,8 +10,8 @@ use crate::db::redis::RedisDriver;
 use crate::db::sqlite::SqliteDriver;
 use crate::db::{
     AlterOp, CellEdit, ColumnInfo, ColumnStats, ConnectionConfig, DataQuery, DatabaseDriver, DbKind,
-    ErModel, IndexInfo, KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RowDelete, RowInsert,
-    ServerInfoSection, TableInfo,
+    ErModel, IndexInfo, KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete,
+    RowInsert, ServerInfoSection, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::ssh::TunnelGuard;
@@ -206,6 +206,33 @@ impl Active {
             Active::Sqlite(d) => d.drop_database(name).await,
             Active::Mongo(d) => d.drop_database(name).await,
             Active::Redis(d) => d.drop_database(name).await,
+        }
+    }
+    async fn list_routines(&self, database: &str) -> AppResult<Vec<RoutineInfo>> {
+        match self {
+            Active::Mysql(d) => d.list_routines(database).await,
+            Active::Postgres(d) => d.list_routines(database).await,
+            Active::Sqlite(d) => d.list_routines(database).await,
+            Active::Mongo(d) => d.list_routines(database).await,
+            Active::Redis(d) => d.list_routines(database).await,
+        }
+    }
+    async fn routine_definition(&self, database: &str, name: &str, routine_type: &str) -> AppResult<String> {
+        match self {
+            Active::Mysql(d) => d.routine_definition(database, name, routine_type).await,
+            Active::Postgres(d) => d.routine_definition(database, name, routine_type).await,
+            Active::Sqlite(d) => d.routine_definition(database, name, routine_type).await,
+            Active::Mongo(d) => d.routine_definition(database, name, routine_type).await,
+            Active::Redis(d) => d.routine_definition(database, name, routine_type).await,
+        }
+    }
+    async fn exec_ddl(&self, sql: &str) -> AppResult<()> {
+        match self {
+            Active::Mysql(d) => d.exec_ddl(sql).await,
+            Active::Postgres(d) => d.exec_ddl(sql).await,
+            Active::Sqlite(d) => d.exec_ddl(sql).await,
+            Active::Mongo(d) => d.exec_ddl(sql).await,
+            Active::Redis(d) => d.exec_ddl(sql).await,
         }
     }
     async fn alter_table(&self, database: &str, table: &str, op: &AlterOp) -> AppResult<()> {
@@ -532,6 +559,18 @@ impl ConnectionManager {
 
     pub async fn drop_database(&self, id: &str, name: &str) -> AppResult<()> {
         self.get(id)?.active.drop_database(name).await
+    }
+
+    pub async fn list_routines(&self, id: &str, database: &str) -> AppResult<Vec<RoutineInfo>> {
+        self.get(id)?.active.list_routines(database).await
+    }
+
+    pub async fn routine_definition(&self, id: &str, database: &str, name: &str, routine_type: &str) -> AppResult<String> {
+        self.get(id)?.active.routine_definition(database, name, routine_type).await
+    }
+
+    pub async fn exec_ddl(&self, id: &str, sql: &str) -> AppResult<()> {
+        self.get(id)?.active.exec_ddl(sql).await
     }
 
     pub async fn alter_table(

@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::db::{
     collect_relations, filter_op_sql, op_needs_value, AlterOp, CellEdit, ColumnInfo, ColumnStats,
     ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, IndexInfo,
-    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
+    PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -406,6 +406,74 @@ impl DatabaseDriver for PostgresDriver {
         let sql = format!("DROP SCHEMA {} CASCADE", quote_ident(name));
         sqlx::query(&sql)
             .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn list_routines(&self, database: &str) -> AppResult<Vec<RoutineInfo>> {
+        let mut out = Vec::new();
+        // 函式 / 程序（pg_proc.prokind：f=function、p=procedure；需 PG 11+）。
+        let rows = sqlx::query(
+            "SELECT p.proname, CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END \
+             FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid \
+             WHERE n.nspname = $1 AND p.prokind IN ('f','p') ORDER BY p.proname",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        for r in &rows {
+            if let (Ok(name), Ok(rt)) = (r.try_get::<String, _>(0), r.try_get::<String, _>(1)) {
+                out.push(RoutineInfo { name, routine_type: rt, parent: None });
+            }
+        }
+        // 觸發器（排除內部 tgisinternal）；附所屬資料表（刪除觸發器需要）。
+        let trows = sqlx::query(
+            "SELECT t.tgname, c.relname FROM pg_trigger t \
+             JOIN pg_class c ON t.tgrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid \
+             WHERE n.nspname = $1 AND NOT t.tgisinternal ORDER BY t.tgname",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        for r in &trows {
+            if let Ok(name) = r.try_get::<String, _>(0) {
+                out.push(RoutineInfo { name, routine_type: "trigger".into(), parent: r.try_get::<String, _>(1).ok() });
+            }
+        }
+        Ok(out)
+    }
+
+    async fn routine_definition(&self, database: &str, name: &str, routine_type: &str) -> AppResult<String> {
+        // 重載函式以 LIMIT 1 取其一（MVP）。
+        let sql = if routine_type == "trigger" {
+            "SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t \
+             JOIN pg_class c ON t.tgrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid \
+             WHERE n.nspname = $1 AND t.tgname = $2 AND NOT t.tgisinternal LIMIT 1"
+        } else {
+            "SELECT pg_get_functiondef(p.oid) FROM pg_proc p \
+             JOIN pg_namespace n ON p.pronamespace = n.oid \
+             WHERE n.nspname = $1 AND p.proname = $2 LIMIT 1"
+        };
+        let row = sqlx::query(sql)
+            .bind(database)
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        match row {
+            Some(r) => r.try_get::<String, _>(0).map_err(|e| AppError::Query(e.to_string())),
+            None => Err(AppError::Query(format!("找不到「{name}」的定義"))),
+        }
+    }
+
+    async fn exec_ddl(&self, sql: &str) -> AppResult<()> {
+        // 簡單查詢協定：可靠處理 CREATE FUNCTION/TRIGGER（含 $$ dollar-quoting 內部 ;）。
+        use sqlx::Executor;
+        self.pool
+            .execute(sql)
             .await
             .map(|_| ())
             .map_err(|e| AppError::Query(e.to_string()))

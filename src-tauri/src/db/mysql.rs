@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::db::{
     collect_relations, filter_op_sql, op_needs_value, AlterOp, CellEdit, ColumnInfo, ColumnStats,
     ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, IndexInfo,
-    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
+    PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -390,6 +390,64 @@ impl DatabaseDriver for MysqlDriver {
         let sql = format!("DROP DATABASE {}", quote_ident(name));
         sqlx::query(&sql)
             .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn list_routines(&self, database: &str) -> AppResult<Vec<RoutineInfo>> {
+        let mut out = Vec::new();
+        let rows = sqlx::query(
+            "SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES \
+             WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_NAME",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        for r in &rows {
+            if let Some(name) = str_col(r, 0) {
+                let rt = str_col(r, 1).unwrap_or_default().to_lowercase(); // procedure | function
+                out.push(RoutineInfo { name, routine_type: rt, parent: None });
+            }
+        }
+        let trows = sqlx::query(
+            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE FROM information_schema.TRIGGERS \
+             WHERE TRIGGER_SCHEMA = ? ORDER BY TRIGGER_NAME",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        for r in &trows {
+            if let Some(name) = str_col(r, 0) {
+                out.push(RoutineInfo { name, routine_type: "trigger".into(), parent: str_col(r, 1) });
+            }
+        }
+        Ok(out)
+    }
+
+    async fn routine_definition(&self, database: &str, name: &str, routine_type: &str) -> AppResult<String> {
+        let qn = format!("{}.{}", quote_ident(database), quote_ident(name));
+        let stmt = match routine_type {
+            "procedure" => format!("SHOW CREATE PROCEDURE {qn}"),
+            "function" => format!("SHOW CREATE FUNCTION {qn}"),
+            "trigger" => format!("SHOW CREATE TRIGGER {qn}"),
+            _ => return Err(AppError::Query(format!("未知的程序類型「{routine_type}」"))),
+        };
+        let row = sqlx::query(&stmt)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        // SHOW CREATE {PROCEDURE|FUNCTION|TRIGGER} 的定義都在第 3 欄（index 2）。
+        str_col(&row, 2).ok_or_else(|| AppError::Query("無法取得定義（可能權限不足）".into()))
+    }
+
+    async fn exec_ddl(&self, sql: &str) -> AppResult<()> {
+        // 簡單查詢協定（COM_QUERY）：支援 CREATE PROCEDURE / TRIGGER（prepared 協定不支援）。
+        use sqlx::Executor;
+        self.pool
+            .execute(sql)
             .await
             .map(|_| ())
             .map_err(|e| AppError::Query(e.to_string()))

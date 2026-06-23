@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 use crate::backup::{self, BackupResult};
 use crate::db::{
     AlterOp, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, ErModel, KeyDetail, KeyEdit,
-    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, ServerInfoSection, TableInfo,
+    PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, ServerInfoSection, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::manager::ConnectionManager;
@@ -297,6 +297,30 @@ pub async fn drop_collection(
 #[tauri::command]
 pub async fn drop_database(state: State<'_, AppState>, id: String, name: String) -> AppResult<()> {
     state.manager.drop_database(&id, &name).await
+}
+
+/// 列出預存程序 / 函式 / 觸發器。
+#[tauri::command]
+pub async fn list_routines(state: State<'_, AppState>, id: String, database: String) -> AppResult<Vec<RoutineInfo>> {
+    state.manager.list_routines(&id, &database).await
+}
+
+/// 取得預存程序 / 函式 / 觸發器的建立 DDL。
+#[tauri::command]
+pub async fn routine_definition(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    name: String,
+    routine_type: String,
+) -> AppResult<String> {
+    state.manager.routine_definition(&id, &database, &name, &routine_type).await
+}
+
+/// 執行 DDL（CREATE / DROP PROCEDURE / FUNCTION / TRIGGER 等，以簡單查詢協定整段送出）。
+#[tauri::command]
+pub async fn exec_ddl(state: State<'_, AppState>, id: String, sql: String) -> AppResult<()> {
+    state.manager.exec_ddl(&id, &sql).await
 }
 
 #[tauri::command]

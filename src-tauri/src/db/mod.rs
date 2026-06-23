@@ -128,6 +128,15 @@ pub struct IndexInfo {
     pub primary: bool,
 }
 
+/// 預存程序 / 函式 / 觸發器（routine browser 用）。
+#[derive(Debug, Clone, Serialize)]
+pub struct RoutineInfo {
+    pub name: String,
+    pub routine_type: String, // "procedure" | "function" | "trigger"
+    /// 觸發器所屬資料表（procedure / function 為 None）。PG 刪除觸發器需此資訊。
+    pub parent: Option<String>,
+}
+
 /// 欄位定義（「結構」分頁用）。
 #[derive(Debug, Clone, Serialize)]
 pub struct ColumnInfo {
@@ -480,6 +489,27 @@ pub trait DatabaseDriver: Send + Sync {
     /// MongoDB → Database::drop。SQLite 單檔不支援。
     async fn drop_database(&self, _name: &str) -> AppResult<()> {
         Err(AppError::Unsupported("此資料庫不支援刪除資料庫".into()))
+    }
+
+    /// 列出資料庫 / schema 內的預存程序 / 函式 / 觸發器。非關聯式預設回空清單。
+    async fn list_routines(&self, _database: &str) -> AppResult<Vec<RoutineInfo>> {
+        Ok(vec![])
+    }
+
+    /// 取得某預存程序 / 函式 / 觸發器的建立 DDL。routine_type ∈ procedure|function|trigger。
+    async fn routine_definition(
+        &self,
+        _database: &str,
+        _name: &str,
+        _routine_type: &str,
+    ) -> AppResult<String> {
+        Err(AppError::Unsupported("此資料庫不支援預存程序 / 觸發器".into()))
+    }
+
+    /// 執行 DDL（CREATE PROCEDURE / TRIGGER 等編譯語句）。以簡單查詢協定送出整段——
+    /// MySQL 的 prepared 協定不支援 CREATE PROCEDURE，且內部 ; 不可被前端切句。SQL 專用。
+    async fn exec_ddl(&self, _sql: &str) -> AppResult<()> {
+        Err(AppError::Unsupported("此資料庫不支援此操作".into()))
     }
 
     /// 結構編輯（DDL：ALTER TABLE）。非關聯式預設 Unsupported。

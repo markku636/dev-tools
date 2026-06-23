@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::db::{
     filter_op_sql, op_needs_value, AlterOp, CellEdit, ColumnInfo, ColumnStats, ConnectionConfig, DataQuery,
     DatabaseDriver, ErColumn, ErModel, ErRelation, ErTable, Filter, IndexInfo, PagedData,
-    PoolStatus, QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
+    PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, Sort, SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -77,6 +77,44 @@ impl DatabaseDriver for SqliteDriver {
                 Some(TableInfo { name, kind: ttype })
             })
             .collect())
+    }
+
+    // SQLite 無預存程序 / 函式，僅有觸發器（存於 sqlite_master）。
+    async fn list_routines(&self, _database: &str) -> AppResult<Vec<RoutineInfo>> {
+        let rows = sqlx::query(
+            "SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let name: String = r.try_get(0).ok()?;
+                Some(RoutineInfo { name, routine_type: "trigger".into(), parent: r.try_get::<String, _>(1).ok() })
+            })
+            .collect())
+    }
+
+    async fn routine_definition(&self, _database: &str, name: &str, _routine_type: &str) -> AppResult<String> {
+        let row = sqlx::query("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        match row {
+            Some(r) => r.try_get::<String, _>(0).map_err(|e| AppError::Query(e.to_string())),
+            None => Err(AppError::Query(format!("找不到觸發器「{name}」"))),
+        }
+    }
+
+    async fn exec_ddl(&self, sql: &str) -> AppResult<()> {
+        use sqlx::Executor;
+        self.pool
+            .execute(sql)
+            .await
+            .map(|_| ())
+            .map_err(|e| AppError::Query(e.to_string()))
     }
 
     async fn table_columns(
