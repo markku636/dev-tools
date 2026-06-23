@@ -157,7 +157,7 @@ export default function RoutinesDialog({ connId, db, kind, onClose }: {
               ) : (
                 <table className="w-full text-sm">
                   <thead className="text-white/40 text-xs">
-                    <tr><th className="text-left px-3 py-1.5 font-normal">名稱</th><th className="text-left px-3 py-1.5 font-normal">類型</th><th className="text-left px-3 py-1.5 font-normal">所屬表</th><th className="w-32 font-normal" aria-label="操作" /></tr>
+                    <tr><th className="text-left px-3 py-1.5 font-normal">名稱</th><th className="text-left px-3 py-1.5 font-normal">類型</th><th className="text-left px-3 py-1.5 font-normal">所屬表</th><th className="text-left px-3 py-1.5 font-normal whitespace-nowrap">修改時間</th><th className="text-left px-3 py-1.5 font-normal">決定性</th><th className="text-left px-3 py-1.5 font-normal">註解</th><th className="w-32 font-normal" aria-label="操作" /></tr>
                   </thead>
                   <tbody>
                     {list.map((r) => (
@@ -165,6 +165,9 @@ export default function RoutinesDialog({ connId, db, kind, onClose }: {
                         <td className="px-3 py-1.5 mono">{r.name}{r.signature != null ? `(${r.signature})` : ""}</td>
                         <td className="px-3 py-1.5 text-white/60">{TYPE_LABEL[r.routine_type] ?? r.routine_type}</td>
                         <td className="px-3 py-1.5 text-white/40 mono">{r.parent ?? "—"}</td>
+                        <td className="px-3 py-1.5 text-white/40 mono whitespace-nowrap">{r.modified ?? "—"}</td>
+                        <td className="px-3 py-1.5 text-white/50">{r.deterministic == null ? "—" : r.deterministic ? "是" : "否"}</td>
+                        <td className="px-3 py-1.5 text-white/40 max-w-[180px] truncate" title={r.comment ?? ""}>{r.comment || "—"}</td>
                         <td className="px-3 py-1.5 text-right whitespace-nowrap">
                           {(r.routine_type === "function" || r.routine_type === "procedure") && (
                             <button type="button" onClick={() => execute(r)} disabled={busy}

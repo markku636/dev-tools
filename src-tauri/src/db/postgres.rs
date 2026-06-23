@@ -428,7 +428,7 @@ impl DatabaseDriver for PostgresDriver {
         for r in &rows {
             if let (Ok(name), Ok(rt)) = (r.try_get::<String, _>(0), r.try_get::<String, _>(1)) {
                 let sig = r.try_get::<String, _>(2).ok();
-                out.push(RoutineInfo { name, routine_type: rt, parent: None, signature: sig });
+                out.push(RoutineInfo { name, routine_type: rt, parent: None, signature: sig, modified: None, deterministic: None, comment: None });
             }
         }
         // 觸發器（排除內部 tgisinternal）；附所屬資料表（刪除觸發器需要）。
@@ -443,7 +443,7 @@ impl DatabaseDriver for PostgresDriver {
         .map_err(|e| AppError::Query(e.to_string()))?;
         for r in &trows {
             if let Ok(name) = r.try_get::<String, _>(0) {
-                out.push(RoutineInfo { name, routine_type: "trigger".into(), parent: r.try_get::<String, _>(1).ok(), signature: None });
+                out.push(RoutineInfo { name, routine_type: "trigger".into(), parent: r.try_get::<String, _>(1).ok(), signature: None, modified: None, deterministic: None, comment: None });
             }
         }
         Ok(out)

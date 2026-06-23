@@ -146,6 +146,15 @@ pub struct RoutineInfo {
     pub parent: Option<String>,
     /// PG 函式 / 程序的引數型別簽章（如 "integer, text"），用於消除重載歧義刪除。其餘為 None。
     pub signature: Option<String>,
+    /// 最後修改時間（MySQL routines / triggers；其餘 None）。對標 Navicat 函式檢視「修改日期」。
+    #[serde(default)]
+    pub modified: Option<String>,
+    /// 是否具決定性（僅 MySQL 函式有意義；其餘 None）。
+    #[serde(default)]
+    pub deterministic: Option<bool>,
+    /// 註解（MySQL routines；其餘 None）。
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 /// 欄位定義（「結構」分頁用）。

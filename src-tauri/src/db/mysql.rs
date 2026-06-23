@@ -398,8 +398,9 @@ impl DatabaseDriver for MysqlDriver {
     async fn list_routines(&self, database: &str) -> AppResult<Vec<RoutineInfo>> {
         let mut out = Vec::new();
         let rows = sqlx::query(
-            "SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES \
-             WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_NAME",
+            "SELECT ROUTINE_NAME, ROUTINE_TYPE, \
+             DATE_FORMAT(LAST_ALTERED, '%Y-%m-%d %H:%i:%s'), IS_DETERMINISTIC, ROUTINE_COMMENT \
+             FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_NAME",
         )
         .bind(database)
         .fetch_all(&self.pool)
@@ -408,12 +409,26 @@ impl DatabaseDriver for MysqlDriver {
         for r in &rows {
             if let Some(name) = str_col(r, 0) {
                 let rt = str_col(r, 1).unwrap_or_default().to_lowercase(); // procedure | function
-                out.push(RoutineInfo { name, routine_type: rt, parent: None, signature: None });
+                // 決定性僅對函式有意義；程序不顯示。
+                let deterministic = if rt == "function" {
+                    str_col(r, 3).map(|s| s.eq_ignore_ascii_case("yes"))
+                } else {
+                    None
+                };
+                out.push(RoutineInfo {
+                    name,
+                    routine_type: rt,
+                    parent: None,
+                    signature: None,
+                    modified: str_col(r, 2),
+                    deterministic,
+                    comment: str_col(r, 4).filter(|s| !s.is_empty()),
+                });
             }
         }
         let trows = sqlx::query(
-            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE FROM information_schema.TRIGGERS \
-             WHERE TRIGGER_SCHEMA = ? ORDER BY TRIGGER_NAME",
+            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, DATE_FORMAT(CREATED, '%Y-%m-%d %H:%i:%s') \
+             FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? ORDER BY TRIGGER_NAME",
         )
         .bind(database)
         .fetch_all(&self.pool)
@@ -421,7 +436,15 @@ impl DatabaseDriver for MysqlDriver {
         .map_err(|e| AppError::Query(e.to_string()))?;
         for r in &trows {
             if let Some(name) = str_col(r, 0) {
-                out.push(RoutineInfo { name, routine_type: "trigger".into(), parent: str_col(r, 1), signature: None });
+                out.push(RoutineInfo {
+                    name,
+                    routine_type: "trigger".into(),
+                    parent: str_col(r, 1),
+                    signature: None,
+                    modified: str_col(r, 2),
+                    deterministic: None,
+                    comment: None,
+                });
             }
         }
         Ok(out)

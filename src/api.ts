@@ -63,6 +63,9 @@ export interface RoutineInfo {
   routine_type: string; // "procedure" | "function" | "trigger"
   parent: string | null; // 觸發器所屬資料表
   signature: string | null; // PG 函式 / 程序引數型別簽章（重載消歧用）
+  modified?: string | null; // 最後修改時間（MySQL）
+  deterministic?: boolean | null; // 具決定性（MySQL 函式）
+  comment?: string | null; // 註解（MySQL）
 }
 
 export interface ForeignKeyInfo {
