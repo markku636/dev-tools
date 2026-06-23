@@ -8,8 +8,9 @@ import { useStore } from "./store";
 function searchSql(kind: DbKind, pattern: string): string {
   const like = sqlLiteral(kind, `%${pattern}%`);
   if (kind === "postgres") {
+    // 別名全部加雙引號：column / type 為保留字，未引號會語法錯誤。
     return (
-      "SELECT table_schema AS schema, table_name AS \"table\", column_name AS column, data_type AS type " +
+      'SELECT table_schema AS "schema", table_name AS "table", column_name AS "column", data_type AS "type" ' +
       "FROM information_schema.columns " +
       "WHERE table_schema NOT IN ('pg_catalog','information_schema') " +
       `AND (table_name ILIKE ${like} OR column_name ILIKE ${like}) ` +
