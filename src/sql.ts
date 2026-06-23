@@ -135,6 +135,16 @@ export function buildConvertCharset(db: string, table: string, charset: string, 
   const coll = collation.trim() ? ` COLLATE ${collation.trim()}` : "";
   return `ALTER TABLE ${qualifiedName("mysql", db, table)} CONVERT TO CHARACTER SET ${charset}${coll}`;
 }
+// 取得資料庫預設字元集 / 定序（MySQL），供資料庫屬性回填。
+export function databaseOptionsSql(db: string): string {
+  return "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA " +
+    `WHERE SCHEMA_NAME = ${sqlLiteral("mysql", db)}`;
+}
+// 變更資料庫預設字元集 / 定序（ALTER DATABASE；僅影響日後新表，不轉換既有資料）。
+export function buildAlterDatabaseCharset(db: string, charset: string, collation: string): string {
+  const coll = collation.trim() ? ` COLLATE ${collation.trim()}` : "";
+  return `ALTER DATABASE ${quoteIdent("mysql", db)} CHARACTER SET ${charset}${coll}`;
+}
 // 變更資料表選項（MySQL）：依有變動的欄位組合單一 ALTER TABLE。engine 為關鍵字（呼叫端以白名單下拉確保安全）；
 // comment 為字面值跳脫；autoIncrement 取整數插值。無任何變動回 null。
 export function buildAlterTableOptions(

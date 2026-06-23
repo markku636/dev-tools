@@ -28,6 +28,8 @@ import {
   tableOptionsSql,
   buildAlterTableOptions,
   buildConvertCharset,
+  databaseOptionsSql,
+  buildAlterDatabaseCharset,
   buildAddForeignKey,
   buildRenameIndex,
   buildDropForeignKey,
@@ -308,6 +310,15 @@ describe("table/database lifecycle DDL", () => {
     expect(buildConvertCharset("db", "t", "utf8mb4", "")).toBe("ALTER TABLE `db`.`t` CONVERT TO CHARACTER SET utf8mb4");
     expect(buildConvertCharset("db", "t", "utf8mb4", "utf8mb4_unicode_ci")).toBe(
       "ALTER TABLE `db`.`t` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    );
+  });
+  it("databaseOptionsSql / buildAlterDatabaseCharset", () => {
+    expect(databaseOptionsSql("shop")).toBe(
+      "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'shop'",
+    );
+    expect(buildAlterDatabaseCharset("shop", "utf8mb4", "")).toBe("ALTER DATABASE `shop` CHARACTER SET utf8mb4");
+    expect(buildAlterDatabaseCharset("shop", "utf8mb4", "utf8mb4_general_ci")).toBe(
+      "ALTER DATABASE `shop` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
     );
   });
   it("buildAlterTableOptions: combines changed parts; null when none", () => {

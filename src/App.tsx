@@ -17,6 +17,7 @@ import ViewDesigner from "./ViewDesigner";
 import ProcessListDialog from "./ProcessListDialog";
 import ServerQueryDialog from "./ServerQueryDialog";
 import UserManager from "./UserManager";
+import DatabaseProperties from "./DatabaseProperties";
 import SearchObjectsDialog from "./SearchObjectsDialog";
 import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile } from "./ui";
 import {
@@ -344,6 +345,7 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
   const [serverQuery, setServerQuery] = useState<{ connId: string; title: string; sql: string } | null>(null);
   const [userMgr, setUserMgr] = useState<{ connId: string } | null>(null);
   const [viewDesign, setViewDesign] = useState<{ connId: string; db: string; view: string; kind: DbKind } | null>(null);
+  const [dbProps, setDbProps] = useState<{ connId: string; db: string } | null>(null);
   // 物件搜尋（資料表 / 欄位）。
   const [searchObjs, setSearchObjs] = useState<{ connId: string; kind: DbKind } | null>(null);
   // 連線 / 表 搜尋過濾字串
@@ -884,6 +886,7 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                       arr.push(["新增視圖…", () => { if (dbConn) setCreateView({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false]);
                       arr.push(["預存程序 / 觸發器…", () => { if (dbConn) setRoutines({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false]);
                       arr.push(["匯出結構 SQL…", () => dumpSchema(dbMenu.connId, dbMenu.db), false]);
+                      if (k === "mysql") arr.push(["資料庫屬性…", () => setDbProps({ connId: dbMenu.connId, db: dbMenu.db }), false]);
                       arr.push(["編輯屬性…", editConn, false]);
                       // 系統 schema / 庫，以及 MySQL 使用中的預設庫，不顯示刪除（後端亦硬擋）。
                       const isDefault = k === "mysql" && dbConn?.database === dbMenu.db;
@@ -1059,6 +1062,10 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
 
       {userMgr && (
         <UserManager connId={userMgr.connId} onClose={() => setUserMgr(null)} />
+      )}
+
+      {dbProps && (
+        <DatabaseProperties connId={dbProps.connId} db={dbProps.db} onClose={() => setDbProps(null)} />
       )}
 
       {viewDesign && (
