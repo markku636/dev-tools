@@ -1096,7 +1096,7 @@ function RowField({ value, onSave }: { value: string | null; onSave: (raw: strin
 }
 
 // 儲存格內容檢視器：檢視 / 編輯長文字、JSON、二進位預覽。可一鍵格式化 JSON、複製。
-function CellInspector({ column, value, editable, onSave, onClose, showFormat = true }: {
+export function CellInspector({ column, value, editable, onSave, onClose, showFormat = true }: {
   column: string;
   value: string | null;
   editable: boolean;

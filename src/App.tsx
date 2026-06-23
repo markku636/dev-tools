@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ConnectionConfig, DbKind, KIND_META, PoolStatus, QueryResult, TableInfo } from "./api";
 import { useStore } from "./store";
 import ConnectionDialog from "./ConnectionDialog";
-import TableView from "./TableView";
+import TableView, { CellInspector } from "./TableView";
 import BackupDialog from "./BackupDialog";
 import ErDiagram from "./ErDiagram";
 import RedisStatus from "./RedisStatus";
@@ -1449,6 +1449,7 @@ function QueryPane() {
 function ResultTable({ result }: { result: QueryResult }) {
   const [selected, setSelected] = useState<{ r: number; c: number } | null>(null);
   const [menu, setMenu] = useState<{ r: number; c: number; x: number; y: number } | null>(null);
+  const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
 
   if (result.columns.length === 0) {
     return (
@@ -1563,6 +1564,16 @@ function ResultTable({ result }: { result: QueryResult }) {
         </div>
       )}
 
+      {inspect && (
+        <CellInspector
+          column={result.columns[inspect.c]}
+          value={cell(inspect.r, inspect.c)}
+          editable={false}
+          onSave={() => {}}
+          onClose={() => setInspect(null)}
+        />
+      )}
+
       {menu && (
         <>
           <div className="fixed inset-0 z-[89]"
@@ -1572,6 +1583,7 @@ function ResultTable({ result }: { result: QueryResult }) {
             style={{ left: menu.x, top: menu.y }}>
             {(
               [
+                ["檢視內容…", () => setInspect({ r: menu.r, c: menu.c })],
                 ["複製值", () => copyCell(menu.r, menu.c)],
                 ["複製整列 (TSV)", () => copyRowTsv(menu.r)],
                 ["複製整列 (JSON)", () => copyRowJson(menu.r)],
