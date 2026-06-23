@@ -78,6 +78,45 @@ export default function App() {
     return () => clearTimeout(t);
   }, [splash]);
 
+  // 匯出連線設定到 JSON（不含密碼 / SSH 機密，存於 keychain）。對標 Navicat 連線匯出（備份 / 遷移）。
+  const exportConnections = async () => {
+    const conns = useStore.getState().connections;
+    if (conns.length === 0) { toast.info("沒有可匯出的連線"); return; }
+    const safe = conns.map(({ password, ssh_password, ssh_passphrase, ...rest }) => rest);
+    const path = await pickSaveFile("at-kit-connections.json", [{ name: "JSON", extensions: ["json"] }]);
+    if (!path) return;
+    try {
+      await api.saveTextFile(path, JSON.stringify({ version: 1, connections: safe }, null, 2));
+      toast.success(`已匯出 ${safe.length} 個連線（不含密碼）`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "匯出失敗");
+    }
+  };
+  // 從 JSON 匯入連線：重新產生 ID（不覆蓋既有）、清空機密（需重新輸入密碼）、基本欄位驗證。
+  const importConnections = async () => {
+    const path = await pickOpenFile([{ name: "JSON", extensions: ["json"] }]);
+    if (!path) return;
+    try {
+      const parsed = JSON.parse(await api.readTextFile(path));
+      const arr: any[] = Array.isArray(parsed) ? parsed : parsed?.connections;
+      if (!Array.isArray(arr)) { toast.error("檔案格式不符（需連線陣列）"); return; }
+      let n = 0;
+      for (const raw of arr) {
+        if (!raw || typeof raw.name !== "string" || typeof raw.kind !== "string" || typeof raw.host !== "string") continue;
+        const c: ConnectionConfig = {
+          ...raw, id: crypto.randomUUID(),
+          port: Number(raw.port) || 0,
+          username: typeof raw.username === "string" ? raw.username : "",
+          password: "", ssh_password: "", ssh_passphrase: "",
+        };
+        try { await api.saveConnection(c); useStore.getState().addConnection(c); n++; } catch { /* 跳過無效項 */ }
+      }
+      toast.success(n > 0 ? `已匯入 ${n} 個連線（請重新輸入密碼）` : "沒有可匯入的連線");
+    } catch (e: any) {
+      toast.error(`匯入失敗：${e?.message ?? "JSON 解析錯誤"}`);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       {splash !== "done" && (
@@ -96,6 +135,8 @@ export default function App() {
         onEr={() => canEr && setErOpen(true)}
         canEr={canEr}
         onHelp={() => setHelpOpen(true)}
+        onExportConns={exportConnections}
+        onImportConns={importConnections}
       />
       <div className="flex-1 flex min-h-0">
         <Sidebar onEdit={(c) => setDialog({ initial: c })} />
@@ -223,13 +264,15 @@ function PoolStatusBadge({ connId }: { connId: string }) {
 }
 
 // ---- 上方大圖示工具列（Navicat 風格識別特徵）----
-function Toolbar({ onNewConnection, onBackup, canBackup, onEr, canEr, onHelp }: {
+function Toolbar({ onNewConnection, onBackup, canBackup, onEr, canEr, onHelp, onExportConns, onImportConns }: {
   onNewConnection: () => void;
   onBackup: () => void;
   canBackup: boolean;
   onEr: () => void;
   canEr: boolean;
   onHelp: () => void;
+  onExportConns: () => void;
+  onImportConns: () => void;
 }) {
   const tools: { icon: ReactNode; label: string; onClick: () => void; disabled: boolean }[] = [
     {
@@ -238,6 +281,8 @@ function Toolbar({ onNewConnection, onBackup, canBackup, onEr, canEr, onHelp }: 
     },
     { icon: "🗺", label: "ER 圖", onClick: onEr, disabled: !canEr },
     { icon: "💾", label: "備份", onClick: onBackup, disabled: !canBackup },
+    { icon: "📤", label: "匯出連線", onClick: onExportConns, disabled: false },
+    { icon: "📥", label: "匯入連線", onClick: onImportConns, disabled: false },
     { icon: "⌨", label: "快捷鍵", onClick: onHelp, disabled: false },
   ];
   return (
