@@ -168,6 +168,15 @@ export function buildRoutineCall(kind: DbKind, db: string, name: string, routine
   return `CALL ${q}(${a})`;
 }
 
+// 重新命名索引：MySQL → ALTER TABLE … RENAME INDEX；PostgreSQL → ALTER INDEX（索引為 schema 物件）。
+// SQLite 無 ALTER INDEX RENAME，呼叫端僅對 MySQL / PG 顯示。
+export function buildRenameIndex(kind: DbKind, db: string, table: string, oldName: string, newName: string): string {
+  if (kind === "postgres") {
+    return `ALTER INDEX ${qualifiedName(kind, db, oldName)} RENAME TO ${quoteIdent(kind, newName.trim())};`;
+  }
+  return `ALTER TABLE ${qualifiedName(kind, db, table)} RENAME INDEX ${quoteIdent(kind, oldName)} TO ${quoteIdent(kind, newName.trim())};`;
+}
+
 // 刪除外鍵：MySQL → DROP FOREIGN KEY；PostgreSQL → DROP CONSTRAINT。
 export function buildDropForeignKey(kind: DbKind, db: string, table: string, name: string): string {
   const clause = kind === "mysql" ? "DROP FOREIGN KEY" : "DROP CONSTRAINT";

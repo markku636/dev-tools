@@ -29,6 +29,7 @@ import {
   buildAlterTableOptions,
   buildConvertCharset,
   buildAddForeignKey,
+  buildRenameIndex,
   buildDropForeignKey,
   buildRowUpdate,
   buildRowDelete,
@@ -349,6 +350,15 @@ describe("table/database lifecycle DDL", () => {
     );
     expect(buildAddForeignKey("mysql", "db", "orders", "fk_o_u", "user_id", "users", "id", "", "CASCADE")).toBe(
       "ALTER TABLE `db`.`orders` ADD CONSTRAINT `fk_o_u` FOREIGN KEY (`user_id`) REFERENCES `db`.`users` (`id`) ON UPDATE CASCADE;",
+    );
+  });
+
+  it("buildRenameIndex: MySQL ALTER TABLE RENAME INDEX, PG ALTER INDEX", () => {
+    expect(buildRenameIndex("mysql", "db", "t", "ix_old", "ix_new")).toBe(
+      "ALTER TABLE `db`.`t` RENAME INDEX `ix_old` TO `ix_new`;",
+    );
+    expect(buildRenameIndex("postgres", "public", "t", "ix_old", "ix_new")).toBe(
+      'ALTER INDEX "public"."ix_old" RENAME TO "ix_new";',
     );
   });
 

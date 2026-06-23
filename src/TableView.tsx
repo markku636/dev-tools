@@ -4,7 +4,7 @@ import {
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard } from "./ui";
-import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey } from "./sql";
+import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import RedisKeyTree from "./RedisKeyTree";
@@ -1914,6 +1914,23 @@ function StructurePane({ tab }: { tab: OpenTab }) {
     }
   };
 
+  // 重新命名索引（僅 MySQL / PG；SQLite 無 ALTER INDEX RENAME）。
+  const renameIndexByName = async (oldName: string) => {
+    if (!kind) return;
+    const nn = await uiPrompt(`重新命名索引「${oldName}」為：`, { title: "重新命名索引", defaultValue: oldName, confirmText: "重新命名" });
+    if (nn === null || !nn.trim() || nn.trim() === oldName) return;
+    setBusy(true);
+    try {
+      await api.execDdl(tab.connId, buildRenameIndex(kind, tab.database, tab.table, oldName, nn));
+      toast.success("索引已重新命名");
+      setNonce((n) => n + 1);
+    } catch (e: any) {
+      toast.error(e?.message ?? "重新命名索引失敗");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const createIndexFn = async (name: string, columns: string[], unique: boolean) => {
     if (!name.trim() || columns.length === 0) { toast.error("請填索引名稱並至少選一欄"); return; }
     setBusy(true);
@@ -2068,7 +2085,12 @@ function StructurePane({ tab }: { tab: OpenTab }) {
                     {ix.primary && <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">PK</span>}
                   </td>
                   {canIndex && (
-                    <td className="px-2 py-1 border-b border-white/5 text-right">
+                    <td className="px-2 py-1 border-b border-white/5 text-right whitespace-nowrap">
+                      {!ix.primary && (kind === "mysql" || kind === "postgres") && (
+                        <button type="button" title="重新命名索引" disabled={busy}
+                          onClick={() => renameIndexByName(ix.name)}
+                          className="px-1 text-white/20 group-hover:text-blue-400 hover:bg-blue-500/20 rounded disabled:opacity-40">✎</button>
+                      )}
                       {!ix.primary && (
                         <button type="button" title="刪除索引" disabled={busy}
                           onClick={() => dropIndexByName(ix.name)}
