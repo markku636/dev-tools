@@ -150,6 +150,16 @@ export function buildAlterDatabaseCharset(db: string, charset: string, collation
   const coll = collation.trim() ? ` COLLATE ${collation.trim()}` : "";
   return `ALTER DATABASE ${quoteIdent("mysql", db)} CHARACTER SET ${charset}${coll}`;
 }
+// 資料庫內各表大小報表（MySQL）：依資料 + 索引大小由大到小，協助找出佔空間的表。
+export function tableSizesSql(db: string): string {
+  return (
+    "SELECT TABLE_NAME AS table_name, TABLE_ROWS AS rows_est, " +
+    "ROUND(DATA_LENGTH/1024/1024, 2) AS data_mb, ROUND(INDEX_LENGTH/1024/1024, 2) AS index_mb, " +
+    "ROUND((DATA_LENGTH+INDEX_LENGTH)/1024/1024, 2) AS total_mb, ENGINE AS engine " +
+    `FROM information_schema.TABLES WHERE TABLE_SCHEMA = ${sqlLiteral("mysql", db)} AND TABLE_TYPE = 'BASE TABLE' ` +
+    "ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC"
+  );
+}
 // 變更資料表選項（MySQL）：依有變動的欄位組合單一 ALTER TABLE。engine 為關鍵字（呼叫端以白名單下拉確保安全）；
 // comment 為字面值跳脫；autoIncrement 取整數插值。無任何變動回 null。
 export function buildAlterTableOptions(

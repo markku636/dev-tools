@@ -31,6 +31,7 @@ import {
   buildConvertCharset,
   databaseOptionsSql,
   buildAlterDatabaseCharset,
+  tableSizesSql,
   buildAddForeignKey,
   buildRenameIndex,
   buildCreateFulltextIndex,
@@ -329,6 +330,12 @@ describe("table/database lifecycle DDL", () => {
     expect(buildAlterDatabaseCharset("shop", "utf8mb4", "utf8mb4_general_ci")).toBe(
       "ALTER DATABASE `shop` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
     );
+  });
+  it("tableSizesSql: escapes schema, base tables only, ordered by size", () => {
+    const s = tableSizesSql("shop");
+    expect(s).toContain("FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'shop' AND TABLE_TYPE = 'BASE TABLE'");
+    expect(s).toContain("ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC");
+    expect(s).toContain("total_mb");
   });
   it("buildAlterTableOptions: combines changed parts; null when none", () => {
     expect(buildAlterTableOptions("db", "t", { engine: "InnoDB" })).toBe("ALTER TABLE `db`.`t` ENGINE = InnoDB");

@@ -26,7 +26,7 @@ import {
   resultToTsv, resultToJson, resultToCsv, resultToMarkdown, fmtElapsed, splitSqlStatements, isDangerousStatement,
   quoteIdent, qualifiedName,
   buildDropTable, buildDropView, buildTruncateTable, buildRenameTable, buildDuplicateTable, isSystemDatabase,
-  buildTableMaintenance, buildInsertAllRows,
+  buildTableMaintenance, buildInsertAllRows, tableSizesSql,
   formatSql,
 } from "./sql";
 import type { SavedQuery } from "./sql";
@@ -945,6 +945,9 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                       arr.push(["新增視圖…", () => { if (dbConn) setCreateView({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false]);
                       arr.push(["預存程序 / 觸發器…", () => { if (dbConn) setRoutines({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false]);
                       arr.push(["匯出結構 SQL…", () => dumpSchema(dbMenu.connId, dbMenu.db), false]);
+                      if (k === "mysql") arr.push(["資料表大小報表…", () => setServerQuery({
+                        connId: dbMenu.connId, title: `資料表大小：${dbMenu.db}`, sql: tableSizesSql(dbMenu.db),
+                      }), false]);
                       if (k === "mysql") arr.push(["資料庫屬性…", () => setDbProps({ connId: dbMenu.connId, db: dbMenu.db }), false]);
                       arr.push(["編輯屬性…", editConn, false]);
                       // 系統 schema / 庫，以及 MySQL 使用中的預設庫，不顯示刪除（後端亦硬擋）。
