@@ -498,6 +498,17 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
     sendQuery(m.connId, `SELECT *\nFROM ${qualified(m.kind, m.db, m.table)}\nLIMIT 100;`);
   const genMongoFind = (m: TblRef) =>
     sendQuery(m.connId, JSON.stringify({ db: m.db, collection: m.table, filter: {} }, null, 2));
+  const genMongoAggregate = (m: TblRef) =>
+    sendQuery(
+      m.connId,
+      JSON.stringify(
+        { db: m.db, collection: m.table, pipeline: [{ $match: {} }, { $group: { _id: null, count: { $sum: 1 } } }] },
+        null,
+        2,
+      ),
+    );
+  const genMongoInsert = (m: TblRef) =>
+    sendQuery(m.connId, JSON.stringify({ db: m.db, collection: m.table, insert: [{}] }, null, 2));
   const genCount = (m: TblRef) =>
     sendQuery(m.connId, `SELECT COUNT(*) FROM ${qualified(m.kind, m.db, m.table)};`);
   const genInsert = async (m: TblRef) => {
@@ -849,7 +860,9 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                 ? ([
                     ["開啟集合", () => useStore.getState().openTable(tableMenu.connId, tableMenu.db, tableMenu.table)],
                     ["屬性…", () => setTableProps({ connId: tableMenu.connId, db: tableMenu.db, table: tableMenu.table, kind: tableMenu.kind, objKind: tableMenu.objKind })],
-                    ["查詢此集合", () => genMongoFind(tableMenu)],
+                    ["查詢此集合（find）", () => genMongoFind(tableMenu)],
+                    ["聚合範本（aggregate）", () => genMongoAggregate(tableMenu)],
+                    ["插入範本（insert）", () => genMongoInsert(tableMenu)],
                     ["複製集合名", () => copyToClipboard(tableMenu.table, "已複製集合名")],
                     ["刪除集合", () => dropCollection(tableMenu), true],
                   ] as [string, () => void, boolean?][])
