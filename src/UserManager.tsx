@@ -8,7 +8,14 @@ import {
   buildAlterUserPassword,
   buildSetUserLock,
   showGrantsSql,
+  grantScope,
+  buildGrant,
+  buildRevoke,
 } from "./sql";
+
+// MySQL 常用權限（GRANT 關鍵字，非識別字）。
+const PRIVS = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX",
+  "REFERENCES", "CREATE VIEW", "SHOW VIEW", "EXECUTE", "ALL PRIVILEGES"];
 
 // MySQL 使用者管理：對標 Navicat「使用者」檢視 —— 列出帳號（含資源限制 / SSL / 鎖定），
 // 並支援新增 / 刪除 / 修改密碼 / 鎖定切換 / 檢視授權（SHOW GRANTS）。
@@ -45,7 +52,10 @@ export default function UserManager({ connId, onClose }: { connId: string; onClo
   const [nName, setNName] = useState("");
   const [nHost, setNHost] = useState("%");
   const [nPass, setNPass] = useState("");
-  const [grants, setGrants] = useState<{ account: string; lines: string[] } | null>(null);
+  const [grants, setGrants] = useState<{ user: UserRow; lines: string[] } | null>(null);
+  const [gPrivs, setGPrivs] = useState<string[]>([]);
+  const [gDb, setGDb] = useState("");
+  const [gTable, setGTable] = useState("");
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -118,13 +128,43 @@ export default function UserManager({ connId, onClose }: { connId: string; onClo
   const doLock = async (u: UserRow) =>
     run(buildSetUserLock(u.name, u.host, !u.locked), u.locked ? "已解鎖" : "已鎖定");
 
+  const fetchGrants = async (u: UserRow): Promise<string[]> => {
+    const g = await api.runQuery(connId, showGrantsSql(u.name, u.host));
+    return g.rows.map((r) => r[0] ?? "").filter(Boolean);
+  };
+
   const showGrants = async (u: UserRow) => {
     setBusy(true);
     try {
-      const g = await api.runQuery(connId, showGrantsSql(u.name, u.host));
-      setGrants({ account: `${u.name}@${u.host}`, lines: g.rows.map((r) => r[0] ?? "").filter(Boolean) });
+      setGrants({ user: u, lines: await fetchGrants(u) });
+      setGPrivs([]); setGDb(""); setGTable("");
     } catch (e: any) {
       toast.error(e?.message ?? "讀取授權失敗");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const togglePriv = (p: string) =>
+    setGPrivs((cur) => {
+      if (p === "ALL PRIVILEGES") return cur.includes(p) ? [] : ["ALL PRIVILEGES"];
+      const next = cur.filter((x) => x !== "ALL PRIVILEGES");
+      return next.includes(p) ? next.filter((x) => x !== p) : [...next, p];
+    });
+
+  const applyGrant = async (revoke: boolean) => {
+    if (!grants) return;
+    if (gPrivs.length === 0) { toast.error("請選擇至少一項權限"); return; }
+    const u = grants.user;
+    const scope = grantScope(gDb.trim() || null, gTable.trim() || null);
+    const sql = revoke ? buildRevoke(gPrivs, scope, u.name, u.host) : buildGrant(gPrivs, scope, u.name, u.host);
+    setBusy(true);
+    try {
+      await api.execDdl(connId, sql);
+      toast.success(revoke ? "已撤銷權限" : "已授予權限");
+      setGrants({ user: u, lines: await fetchGrants(u) });
+    } catch (e: any) {
+      toast.error(e?.message ?? "操作失敗");
     } finally {
       setBusy(false);
     }
@@ -214,21 +254,47 @@ export default function UserManager({ connId, onClose }: { connId: string; onClo
 
       {grants && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[97]" onClick={() => setGrants(null)}>
-          <div className="bg-[#1a212b] w-[640px] max-w-[94vw] max-h-[70vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
+          <div className="bg-[#1a212b] w-[680px] max-w-[94vw] max-h-[82vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
             onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
-              <span className="font-medium text-sm">授權：{grants.account}</span>
+              <span className="font-medium text-sm">權限管理員：{grants.user.name}@{grants.user.host}</span>
               <button type="button" onClick={() => copyToClipboard(grants.lines.join(";\n") + ";")}
                 className="ml-auto text-xs text-blue-400 hover:text-blue-300">複製</button>
               <button type="button" onClick={() => setGrants(null)} className="text-white/40 hover:text-white">✕</button>
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-2">
+              <div className="text-white/45 text-xs">目前授權</div>
               {grants.lines.length === 0 ? (
                 <div className="text-white/40 text-sm">（無授權）</div>
               ) : grants.lines.map((g, i) => (
                 <div key={i} className="mono text-xs text-white/80 bg-[#0c1118] border border-white/10 rounded px-3 py-2 whitespace-pre-wrap break-all">{g}</div>
               ))}
             </div>
+            {!isInternalAccount(grants.user.name) && (
+              <div className="border-t border-white/10 p-4 space-y-3 bg-[#10161e]">
+                <div className="text-white/45 text-xs">授予 / 撤銷權限</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {PRIVS.map((p) => (
+                    <button key={p} type="button" onClick={() => togglePriv(p)}
+                      className={`text-xs px-2 py-1 rounded border ${gPrivs.includes(p)
+                        ? "bg-blue-600/80 border-blue-500 text-white"
+                        : "border-white/15 text-white/60 hover:bg-white/5"}`}>{p}</button>
+                  ))}
+                </div>
+                <div className="flex items-end gap-2 text-xs">
+                  <label className="flex flex-col gap-1">資料庫（留空=全域 *.*）
+                    <input value={gDb} onChange={(e) => setGDb(e.target.value)}
+                      className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 w-44" placeholder="*.*" /></label>
+                  <label className="flex flex-col gap-1">資料表（留空=整個 db）
+                    <input value={gTable} onChange={(e) => setGTable(e.target.value)}
+                      className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 w-44" placeholder="（全部）" /></label>
+                  <button type="button" onClick={() => applyGrant(false)} disabled={busy}
+                    className="px-3 py-1.5 rounded bg-blue-600/80 hover:bg-blue-600 disabled:opacity-40">授予</button>
+                  <button type="button" onClick={() => applyGrant(true)} disabled={busy}
+                    className="px-3 py-1.5 rounded border border-red-400/40 text-red-300 hover:bg-red-500/10 disabled:opacity-40">撤銷</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

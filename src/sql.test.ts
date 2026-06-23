@@ -35,6 +35,9 @@ import {
   buildAlterUserPassword,
   buildSetUserLock,
   showGrantsSql,
+  grantScope,
+  buildGrant,
+  buildRevoke,
   type NewColumn,
 } from "./sql";
 
@@ -393,5 +396,23 @@ describe("MySQL user management DDL", () => {
   });
   it("showGrantsSql targets the account", () => {
     expect(showGrantsSql("app", "%")).toBe("SHOW GRANTS FOR 'app'@'%'");
+  });
+  it("grantScope: global / db-level / table-level (backtick-quoted idents)", () => {
+    expect(grantScope(null, null)).toBe("*.*");
+    expect(grantScope("shop", null)).toBe("`shop`.*");
+    expect(grantScope("shop", "orders")).toBe("`shop`.`orders`");
+    // 識別字內反引號加倍跳脫。
+    expect(grantScope("a`b", null)).toBe("`a``b`.*");
+  });
+  it("buildGrant / buildRevoke: privileges verbatim, scope + account composed", () => {
+    expect(buildGrant(["SELECT", "INSERT"], "`shop`.*", "app", "%")).toBe(
+      "GRANT SELECT, INSERT ON `shop`.* TO 'app'@'%'",
+    );
+    expect(buildGrant(["ALL PRIVILEGES"], "*.*", "admin", "localhost")).toBe(
+      "GRANT ALL PRIVILEGES ON *.* TO 'admin'@'localhost'",
+    );
+    expect(buildRevoke(["DELETE"], "`shop`.`orders`", "app", "%")).toBe(
+      "REVOKE DELETE ON `shop`.`orders` FROM 'app'@'%'",
+    );
   });
 });

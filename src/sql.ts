@@ -194,6 +194,21 @@ export function userListSql(): string {
 export function showGrantsSql(name: string, host: string): string {
   return `SHOW GRANTS FOR ${mysqlAccount(name, host)}`;
 }
+// GRANT/REVOKE 範圍：無 db → 全域 *.*；有 db 無 table → `db`.*；有 db+table → `db`.`table`。
+// 識別字以反引號跳脫（防注入）；權限關鍵字（SELECT 等）為原樣插值（非識別字，不可加引號）。
+export function grantScope(db: string | null, table: string | null): string {
+  if (!db) return "*.*";
+  const dbq = quoteIdent("mysql", db);
+  return table ? `${dbq}.${quoteIdent("mysql", table)}` : `${dbq}.*`;
+}
+// 授予權限：GRANT priv[, priv] ON scope TO 'user'@'host'。
+export function buildGrant(privs: string[], scope: string, name: string, host: string): string {
+  return `GRANT ${privs.join(", ")} ON ${scope} TO ${mysqlAccount(name, host)}`;
+}
+// 撤銷權限：REVOKE priv[, priv] ON scope FROM 'user'@'host'。
+export function buildRevoke(privs: string[], scope: string, name: string, host: string): string {
+  return `REVOKE ${privs.join(", ")} ON ${scope} FROM ${mysqlAccount(name, host)}`;
+}
 
 // 保守 SQL 格式化：把語句切成「程式碼」與「逐字保留片段」（字串 '...'、識別字 "..."/`...`、
 // 行 / 區塊註解、PG $$），只對程式碼片段重排空白並於主要子句前換行。因僅變動字面值外的空白，
