@@ -124,6 +124,12 @@ export function buildReplaceView(kind: DbKind, db: string, name: string, select:
   return `CREATE OR REPLACE VIEW ${qualifiedName(kind, db, name.trim())} AS\n${select.trim()};`;
 }
 
+// 資料表維護（MySQL）：ANALYZE / CHECK / OPTIMIZE / REPAIR TABLE，皆回傳狀態結果集。
+export type TableMaintenanceOp = "ANALYZE" | "CHECK" | "OPTIMIZE" | "REPAIR";
+export function buildTableMaintenance(op: TableMaintenanceOp, db: string, table: string): string {
+  return `${op} TABLE ${qualifiedName("mysql", db, table)}`;
+}
+
 // 呼叫 routine（執行函式 / 預存程序）：函式以 SELECT、程序以 CALL。
 // 引數為使用者輸入的原樣字串（自行加引號 / 型別，如 42, 'abc'），不再跳脫（呼叫端負責），與 DDL 一致。
 export function buildRoutineCall(kind: DbKind, db: string, name: string, routineType: string, args: string): string {

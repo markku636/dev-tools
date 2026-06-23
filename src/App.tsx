@@ -25,6 +25,7 @@ import {
   resultToTsv, resultToJson, resultToCsv, resultToMarkdown, fmtElapsed, splitSqlStatements, isDangerousStatement,
   quoteIdent, qualifiedName,
   buildDropTable, buildDropView, buildTruncateTable, buildRenameTable, buildDuplicateTable, isSystemDatabase,
+  buildTableMaintenance,
   formatSql,
 } from "./sql";
 import type { SavedQuery } from "./sql";
@@ -945,6 +946,18 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                       ["複製建表 SQL", () => copyDdl(tableMenu)],
                       ["複製表名", () => copyToClipboard(tableMenu.table, "已複製表名")],
                     );
+                    // 資料表維護（MySQL）：ANALYZE / CHECK / OPTIMIZE / REPAIR，結果以伺服器查詢檢視器顯示。
+                    if (!isView && tableMenu.kind === "mysql") {
+                      const maint: [string, "ANALYZE" | "CHECK" | "OPTIMIZE" | "REPAIR"][] = [
+                        ["分析資料表 (ANALYZE)", "ANALYZE"], ["檢查資料表 (CHECK)", "CHECK"],
+                        ["最佳化資料表 (OPTIMIZE)", "OPTIMIZE"], ["修復資料表 (REPAIR)", "REPAIR"],
+                      ];
+                      for (const [label, op] of maint)
+                        arr.push([label, () => setServerQuery({
+                          connId: tableMenu.connId, title: `${label}：${tableMenu.table}`,
+                          sql: buildTableMaintenance(op, tableMenu.db, tableMenu.table),
+                        })]);
+                    }
                     // 視圖改名：PG 容許 ALTER … RENAME；MySQL/SQLite 不支援 view 改名，隱藏以免必定失敗。
                     if (!isView || tableMenu.kind === "postgres") arr.push(["重新命名…", () => renameTable(tableMenu)]);
                     // 複製資料表結構（產生 SQL 到編輯器）；視圖無法以 CREATE TABLE LIKE 複製，略過。
