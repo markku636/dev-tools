@@ -29,6 +29,17 @@ function Assert-LastExit($what) {
     }
 }
 
+# 偵測 MSVC C++ Build Tools（Rust 的 x86_64-pc-windows-msvc 目標需要 link.exe）。
+# 用 vswhere 查是否安裝了 VC.Tools.x86.x64 元件，比直接找 link.exe（不在 PATH）可靠。
+function Test-MsvcLinker {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vswhere)) { return $false }
+    $path = & $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath 2>$null
+    return [bool]$path
+}
+
 Write-Step "at-kit 打包開始"
 
 # --- 1. Node.js ---
@@ -60,6 +71,24 @@ if (Test-Cmd cargo) {
     }
     $env:Path += ";$env:USERPROFILE\.cargo\bin"
     if (-not (Test-Cmd cargo)) { throw "Rust 安裝後仍無法在此工作階段使用，請重開 PowerShell 再執行一次。" }
+}
+
+# --- 2.5 MSVC C++ Build Tools（link.exe）---
+if (Test-MsvcLinker) {
+    Write-Host "MSVC C++ Build Tools 已安裝（link.exe 可用）" -ForegroundColor Green
+} else {
+    Write-Step "未偵測到 MSVC C++ Build Tools，嘗試以 winget 安裝…"
+    Write-Host "注意：這會下載數 GB 的 Visual Studio Build Tools（含 Windows SDK），請耐心等候。" -ForegroundColor DarkYellow
+    if (Test-Cmd winget) {
+        winget install -e --id Microsoft.VisualStudio.2022.BuildTools `
+            --override "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" `
+            --accept-source-agreements --accept-package-agreements
+    } else {
+        throw "找不到 winget，請手動安裝 Visual Studio Build Tools 並勾選『Desktop development with C++』：https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+    }
+    if (-not (Test-MsvcLinker)) {
+        throw "MSVC C++ Build Tools 安裝後仍未偵測到。請重開 PowerShell（必要時重開機）後再執行一次；若仍失敗，請用 Visual Studio Installer 手動勾選『Desktop development with C++』。"
+    }
 }
 
 # Windows 上 Tauri 需要 WebView2（Win11 內建；Win10 多數已有）。提醒即可。
@@ -94,3 +123,6 @@ if (Test-Path $bundleDir) {
 } else {
     Write-Host "找不到 bundle 目錄，請檢查上方建置輸出是否有錯誤。" -ForegroundColor Red
 }
+
+
+PAUSE
