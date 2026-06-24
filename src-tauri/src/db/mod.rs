@@ -281,6 +281,59 @@ pub struct RedisKeys {
     pub truncated: bool,
 }
 
+/// 大型集合型鍵的分頁讀取結果（致敬 Another Redis Desktop Manager 的成員分頁）。
+/// hash/set/zset 走游標式 HSCAN/SSCAN/ZSCAN；list 以 cursor 當 LRANGE 視窗起點。
+/// cursor==0 表示已掃描完成（無更多）；total 為集合總長（LLEN/HLEN/SCARD/ZCARD），-1 表未知。
+#[derive(Debug, Clone, Serialize)]
+pub struct KeyPage {
+    pub type_: String,
+    pub ttl: i64,
+    pub total: i64,
+    pub cursor: u64,
+    /// hash 用：欄位名（與 members 對齊）。
+    pub fields: Vec<String>,
+    /// list/set/zset：元素 / 成員；hash：值；string：單一值。
+    pub members: Vec<String>,
+    /// zset 用：分數（與 members 對齊）。
+    pub scores: Vec<f64>,
+}
+
+/// SLOWLOG GET 單筆（慢查詢日誌）。
+#[derive(Debug, Clone, Serialize)]
+pub struct SlowLogEntry {
+    pub id: i64,
+    /// 發生時間（Unix 秒）。
+    pub time: i64,
+    /// 執行耗時（微秒）。
+    pub duration_us: i64,
+    pub command: String,
+    pub client: String,
+    pub client_name: String,
+}
+
+/// CLIENT LIST 單筆（用戶端連線）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientInfo {
+    pub id: String,
+    pub addr: String,
+    pub name: String,
+    pub age: String,
+    pub idle: String,
+    pub db: String,
+    pub cmd: String,
+    pub flags: String,
+}
+
+/// 大鍵掃描單筆（SCAN 取樣 + MEMORY USAGE）。
+#[derive(Debug, Clone, Serialize)]
+pub struct BigKey {
+    pub key: String,
+    pub type_: String,
+    /// 記憶體用量（位元組）；-1 表伺服器未回（如舊版無 MEMORY USAGE）。
+    pub bytes: i64,
+    pub ttl: i64,
+}
+
 /// 欄位資料剖析（致敬 Navicat / DataGrip）：總列數 / 非空 / 相異值數 + 最小 / 最大（範圍）。
 /// min / max 為 best-effort：某些型別（如 JSON）不支援 MIN/MAX 時為 None。
 #[derive(Debug, Clone, Serialize, Default)]

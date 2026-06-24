@@ -27,6 +27,7 @@ pub fn run() {
             manager: ConnectionManager::new(),
             schedules: Arc::new(Mutex::new(Vec::new())),
             history_lock: Arc::new(tokio::sync::Mutex::new(())),
+            pubsub: Arc::new(Mutex::new(std::collections::HashMap::new())),
         })
         .setup(|app| {
             let handle = app.handle().clone();
@@ -88,6 +89,14 @@ pub fn run() {
             commands::create_index,
             commands::server_info,
             commands::redis_keys,
+            commands::redis_key_page,
+            commands::redis_slowlog,
+            commands::redis_clients,
+            commands::redis_client_kill,
+            commands::redis_big_keys,
+            commands::redis_publish,
+            commands::redis_subscribe,
+            commands::redis_unsubscribe,
             commands::backup_detect_cli,
             commands::backup_run,
             commands::backup_restore,

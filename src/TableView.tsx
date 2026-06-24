@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  api, ColumnInfo, ErRelation, Filter, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, PagedData, RowInsert, Sort, SortDir,
+  api, ColumnInfo, ErRelation, Filter, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, KeyPage, PagedData, RowInsert, Sort, SortDir,
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard } from "./ui";
@@ -8,6 +8,11 @@ import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeign
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import RedisKeyTree from "./RedisKeyTree";
+import NewKeyDialog from "./NewKeyDialog";
+import RedisStatus from "./RedisStatus";
+import RedisConsole from "./RedisConsole";
+import PubSubPanel from "./PubSubPanel";
+import RedisOpsPanel from "./RedisOpsPanel";
 import { AlterOp } from "./api";
 
 const PAGE_SIZE = 100;
@@ -105,6 +110,13 @@ function DataPane({ tab }: { tab: OpenTab }) {
     setRedisView(v);
     try { localStorage.setItem("at-kit:redisKeyView", v); } catch { /* 忽略 */ }
   };
+  // Redis 動作列：把原本藏在右鍵的功能變成一眼可見的工具列按鈕。
+  const connName = useStore((s) => s.connections.find((c) => c.id === tab.connId)?.name ?? "Redis");
+  const [showNewKey, setShowNewKey] = useState(false);
+  const [showStatus, setShowStatus] = useState(false);
+  const [showConsole, setShowConsole] = useState(false);
+  const [showPubSub, setShowPubSub] = useState(false);
+  const [showOps, setShowOps] = useState(false);
 
   // SQL 表的儲存格右鍵選單 / 內容檢視器 / 選取（鍵盤導覽）/「以此列為範本」預填值
   const [cellMenu, setCellMenu] = useState<{ r: number; c: number; x: number; y: number } | null>(null);
@@ -660,6 +672,21 @@ function DataPane({ tab }: { tab: OpenTab }) {
             ))}
           </div>
         )}
+        {isRedis && (
+          <>
+            <button type="button" onClick={() => setShowNewKey(true)} title="新增鍵（String/List/Set/Hash/ZSet）"
+              className="px-2 py-1 rounded hover:bg-white/10 text-emerald-300">＋ 新增鍵</button>
+            <button type="button" onClick={() => setShowStatus(true)} title="伺服器狀態（INFO，可自動刷新）"
+              className="px-2 py-1 rounded hover:bg-white/10 text-white/60">📊 狀態</button>
+            <button type="button" onClick={() => setShowPubSub(true)} title="Pub/Sub 訂閱與發佈"
+              className="px-2 py-1 rounded hover:bg-white/10 text-white/60">📡 Pub/Sub</button>
+            <button type="button" onClick={() => setShowOps(true)} title="維運：慢查詢 / 用戶端 / 大鍵"
+              className="px-2 py-1 rounded hover:bg-white/10 text-white/60">🛠 維運</button>
+            <button type="button" onClick={() => setShowConsole(true)} title="Redis 命令列"
+              className="px-2 py-1 rounded hover:bg-white/10 text-white/60">⌨ 命令列</button>
+            <div className="w-px h-4 bg-white/10 mx-1" />
+          </>
+        )}
         <button
           onClick={async () => {
             if (dirtyCount > 0 && !(await uiConfirm("有未套用的變更，重新整理將放棄。確定？", { title: "放棄變更", danger: true, confirmText: "放棄並重整" }))) return;
@@ -1038,6 +1065,27 @@ function DataPane({ tab }: { tab: OpenTab }) {
         />
       )}
 
+      {showNewKey && (
+        <NewKeyDialog
+          connId={tab.connId}
+          database={tab.database}
+          onClose={() => setShowNewKey(false)}
+          onCreated={() => refresh()}
+        />
+      )}
+      {showStatus && (
+        <RedisStatus connId={tab.connId} connName={connName} onClose={() => setShowStatus(false)} />
+      )}
+      {showConsole && (
+        <RedisConsole connId={tab.connId} connName={connName} initialDb={tab.database} onClose={() => setShowConsole(false)} />
+      )}
+      {showPubSub && (
+        <PubSubPanel connId={tab.connId} connName={connName} onClose={() => setShowPubSub(false)} />
+      )}
+      {showOps && (
+        <RedisOpsPanel connId={tab.connId} connName={connName} database={tab.database} onClose={() => setShowOps(false)} />
+      )}
+
       {rowMenu && (
         <>
           <div className="fixed inset-0 z-[89]"
@@ -1277,24 +1325,85 @@ export function CellInspector({ column, value, editable, onSave, onClose, showFo
   );
 }
 
-// Redis 鍵詳情：依型別呈現五種資料結構，並支援元素級編輯
+// Redis 鍵詳情：依型別呈現五種資料結構，並支援元素級編輯。
+// 大型集合（hash/list/set/zset）改用後端游標式分頁（redisKeyPage），不再一次全載；
+// 並提供成員 / 欄位過濾（hash 比對 field、set/zset 比對 member、list 子字串）。
+const KEY_PAGE = 200;
 function KeyDetailModal({ connId, database, table, rkey, onClose }: {
   connId: string; database: string; table: string; rkey: string; onClose: () => void;
 }) {
-  const [detail, setDetail] = useState<KeyDetail | null>(null);
+  const [page, setPage] = useState<KeyPage | null>(null);
+  // 累積已載入的成員（跨多頁），供 KeyDetailBody 以既有渲染呈現。
+  const [members, setMembers] = useState<string[]>([]);
+  const [fields, setFields] = useState<string[]>([]);
+  const [scores, setScores] = useState<number[]>([]);
+  const [cursor, setCursor] = useState(0);     // 下一頁游標（0 = 已到底）
+  const [filter, setFilter] = useState("");     // 已套用的過濾字串
+  const [filterInput, setFilterInput] = useState("");
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [nonce, setNonce] = useState(0);
+
+  // 首頁載入（reset）：清空累積、從游標 0 開始。connId/db/key/filter 改變或 reload 時觸發。
+  const loadFirst = (flt: string) => {
+    setLoading(true);
+    setErr(null);
+    api
+      .redisKeyPage(connId, database, rkey, 0, KEY_PAGE, flt)
+      .then((p) => {
+        setPage(p);
+        setMembers(p.members);
+        setFields(p.fields);
+        setScores(p.scores);
+        setCursor(p.cursor);
+      })
+      .catch((e) => setErr(e?.message ?? "讀取失敗"))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setErr(null);
     api
-      .keyDetail(connId, database, rkey)
-      .then((d) => !cancelled && setDetail(d))
-      .catch((e) => !cancelled && setErr(e?.message ?? "讀取失敗"));
+      .redisKeyPage(connId, database, rkey, 0, KEY_PAGE, filter)
+      .then((p) => {
+        if (cancelled) return;
+        setPage(p);
+        setMembers(p.members);
+        setFields(p.fields);
+        setScores(p.scores);
+        setCursor(p.cursor);
+      })
+      .catch((e) => !cancelled && setErr(e?.message ?? "讀取失敗"))
+      .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [connId, database, rkey, nonce]);
+    // filter 透過 applyFilter 變更後一併重載；故列入依賴。
+  }, [connId, database, rkey, filter]);
 
-  const reload = () => setNonce((n) => n + 1);
+  const loadMore = () => {
+    if (cursor === 0 || loading) return;
+    setLoading(true);
+    api
+      .redisKeyPage(connId, database, rkey, cursor, KEY_PAGE, filter)
+      .then((p) => {
+        setMembers((m) => [...m, ...p.members]);
+        setFields((f) => [...f, ...p.fields]);
+        setScores((s) => [...s, ...p.scores]);
+        setCursor(p.cursor);
+      })
+      .catch((e) => setErr(e?.message ?? "讀取失敗"))
+      .finally(() => setLoading(false));
+  };
+
+  // 編輯後重載：保留目前過濾、回到第一頁。
+  const reload = () => loadFirst(filter);
+  const applyFilter = () => setFilter(filterInput.trim());
+
+  // 以累積成員合成 KeyDetail 形狀，沿用既有 KeyDetailBody 渲染（entries = members）。
+  const detail: KeyDetail | null = page
+    ? { key: rkey, type_: page.type_, ttl: page.ttl, entries: members, fields, scores }
+    : null;
+  const isCollection = page != null && page.type_ !== "string" && page.type_ !== "none";
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
@@ -1302,19 +1411,39 @@ function KeyDetailModal({ connId, database, table, rkey, onClose }: {
         onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
           <span className="font-medium text-sm mono truncate">{rkey}</span>
-          {detail && (
+          {page && (
             <>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">{detail.type_}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">{page.type_}</span>
               <span className="text-xs text-white/40">
-                TTL: {detail.ttl < 0 ? "無到期" : `${detail.ttl}s`}
+                TTL: {page.ttl < 0 ? "無到期" : `${page.ttl}s`}
               </span>
+              {isCollection && page.total >= 0 && (
+                <span className="text-xs text-white/35">共 {page.total} 筆</span>
+              )}
             </>
           )}
           <button type="button" onClick={onClose} className="ml-auto text-white/40 hover:text-white">✕</button>
         </div>
+
+        {/* 成員過濾（僅集合型）。Enter 或「套用」重載第一頁。 */}
+        {isCollection && (
+          <div className="px-4 py-2 border-b border-white/10 flex items-center gap-2 text-xs">
+            <input value={filterInput} onChange={(e) => setFilterInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") applyFilter(); }}
+              placeholder={page!.type_ === "hash" ? "過濾 field（支援 * ?）" : page!.type_ === "list" ? "過濾子字串" : "過濾成員（支援 * ?）"}
+              className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1 mono outline-none focus:border-blue-500" />
+            <button type="button" onClick={applyFilter}
+              className="px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/60">套用</button>
+            {filter && (
+              <button type="button" onClick={() => { setFilterInput(""); setFilter(""); }}
+                className="px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/40">清除</button>
+            )}
+          </div>
+        )}
+
         <div className="p-4 overflow-auto">
           {err && <div className="text-red-400 text-sm mono mb-2 break-all">{err}</div>}
-          {!detail && !err && <div className="text-white/40 text-sm">讀取中…</div>}
+          {!page && !err && <div className="text-white/40 text-sm">讀取中…</div>}
           {detail && (
             <KeyDetailBody
               detail={detail}
@@ -1325,6 +1454,18 @@ function KeyDetailModal({ connId, database, table, rkey, onClose }: {
               reload={reload}
               onError={setErr}
             />
+          )}
+          {isCollection && (
+            <div className="mt-3 flex items-center gap-3 text-xs text-white/40">
+              <span>已載入 {members.length} 筆{filter ? "（已過濾）" : ""}</span>
+              {cursor !== 0 && (
+                <button type="button" onClick={loadMore} disabled={loading}
+                  className="px-3 py-1 rounded border border-white/15 hover:bg-white/10 text-white/70 disabled:opacity-40">
+                  {loading ? "載入中…" : "載入更多"}
+                </button>
+              )}
+              {cursor === 0 && members.length > 0 && <span className="text-white/25">已全部載入</span>}
+            </div>
           )}
         </div>
       </div>
@@ -1518,23 +1659,89 @@ function InlineEdit({ value, onSave, type = "text" }: {
   );
 }
 
+type ValueView = "raw" | "json" | "hex";
+
 function StringEditor({ value, onSave, busy }: {
   value: string; onSave: (v: string) => void; busy: boolean;
 }) {
   const [text, setText] = useState(value);
+  const [view, setView] = useState<ValueView>("raw");
   useEffect(() => setText(value), [value]);
+
+  const prettyJson = tryPrettyJson(text);
+  const isJson = prettyJson !== null;
+
   return (
     <div className="space-y-2">
-      <textarea value={text} onChange={(e) => setText(e.target.value)} title="字串值"
-        className="w-full h-40 bg-black/30 border border-white/10 rounded p-3 mono text-sm outline-none focus:border-blue-500 resize-none break-all" />
+      {/* 檢視模式：原始（可編輯）/ JSON 美化 / Hex。 */}
+      <div className="flex items-center gap-1 text-xs">
+        {(["raw", "json", "hex"] as ValueView[]).map((v) => (
+          <button key={v} type="button" onClick={() => setView(v)}
+            className={`px-2 py-0.5 rounded ${view === v ? "bg-white/15 text-white" : "text-white/45 hover:bg-white/10"}`}>
+            {v === "raw" ? "原始" : v === "json" ? "JSON" : "Hex"}
+          </button>
+        ))}
+        {view === "json" && isJson && (
+          <button type="button" onClick={() => setText(prettyJson!)} disabled={busy}
+            title="把美化後的 JSON 回填到編輯區（切到「原始」後可儲存）"
+            className="ml-auto px-2 py-0.5 rounded border border-white/15 hover:bg-white/10 text-white/55">回填美化結果</button>
+        )}
+        <span className="ml-auto text-white/30">{byteLen(text)} bytes</span>
+      </div>
+
+      {view === "raw" && (
+        <textarea value={text} onChange={(e) => setText(e.target.value)} title="字串值"
+          className="w-full h-40 bg-black/30 border border-white/10 rounded p-3 mono text-sm outline-none focus:border-blue-500 resize-none break-all" />
+      )}
+      {view === "json" && (
+        <pre className="w-full h-40 overflow-auto bg-black/30 border border-white/10 rounded p-3 mono text-sm whitespace-pre-wrap break-all">
+          {isJson ? prettyJson : <span className="text-white/35">（非有效 JSON）</span>}
+        </pre>
+      )}
+      {view === "hex" && (
+        <pre className="w-full h-40 overflow-auto bg-black/30 border border-white/10 rounded p-3 mono text-xs whitespace-pre">
+          {toHexDump(text)}
+        </pre>
+      )}
+
       <div className="flex justify-end">
-        <button type="button" disabled={busy || text === value} onClick={() => onSave(text)}
+        <button type="button" disabled={busy || text === value || view !== "raw"} onClick={() => onSave(text)}
+          title={view !== "raw" ? "切到「原始」模式才能儲存" : "儲存"}
           className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40">
           {busy ? "儲存中…" : "儲存"}
         </button>
       </div>
     </div>
   );
+}
+
+// JSON 美化：可解析則回傳縮排字串，否則 null。
+function tryPrettyJson(s: string): string | null {
+  const t = s.trim();
+  if (!t || (t[0] !== "{" && t[0] !== "[")) return null;
+  try { return JSON.stringify(JSON.parse(t), null, 2); } catch { return null; }
+}
+
+// UTF-8 位元組長度。
+function byteLen(s: string): number {
+  try { return new TextEncoder().encode(s).length; } catch { return s.length; }
+}
+
+// 經典 hex dump：每列 16 位元組，左偏移、中段 hex、右側可列印字元。
+function toHexDump(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  if (bytes.length === 0) return "（空）";
+  const max = 8192; // 避免超長字串卡渲染
+  const view = bytes.subarray(0, max);
+  const lines: string[] = [];
+  for (let off = 0; off < view.length; off += 16) {
+    const chunk = view.subarray(off, off + 16);
+    const hex = Array.from(chunk).map((b) => b.toString(16).padStart(2, "0")).join(" ").padEnd(16 * 3 - 1, " ");
+    const ascii = Array.from(chunk).map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".")).join("");
+    lines.push(`${off.toString(16).padStart(8, "0")}  ${hex}  ${ascii}`);
+  }
+  if (bytes.length > max) lines.push(`… 已截斷，共 ${bytes.length} bytes`);
+  return lines.join("\n");
 }
 
 function DelCell({ onClick, busy }: { onClick: () => void; busy: boolean }) {

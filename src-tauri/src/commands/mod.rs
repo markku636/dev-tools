@@ -1,13 +1,15 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tauri::{AppHandle, State};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::backup::{self, BackupResult};
 use crate::db::{
-    AlterOp, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, ErModel, KeyDetail, KeyEdit,
-    ForeignKeyInfo, PagedData, PoolStatus, QueryResult, RedisKeys, RoutineInfo, RowDelete, RowInsert,
-    ServerInfoSection, TableInfo,
+    AlterOp, BigKey, CellEdit, ClientInfo, ColumnInfo, ConnectionConfig, DataQuery, ErModel,
+    ForeignKeyInfo, KeyDetail, KeyEdit, KeyPage, PagedData, PoolStatus, QueryResult, RedisKeys,
+    RoutineInfo, RowDelete, RowInsert, ServerInfoSection, SlowLogEntry, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 use crate::manager::ConnectionManager;
@@ -20,6 +22,8 @@ pub struct AppState {
     pub schedules: Arc<Mutex<Vec<BackupSchedule>>>,
     /// 序列化 history.json 的讀-改-寫（避免排程 append 與 clear_history 競態）。
     pub history_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Redis Pub/Sub 訂閱的背景任務（key = 連線 id）。重新訂閱 / 取消訂閱 / 斷線時 abort。
+    pub pubsub: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
 }
 
 /// 若前端送來的 secret 為空（存檔但未重新輸入的連線），從 keychain 補回。
@@ -92,6 +96,9 @@ pub async fn remove_saved_connection(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<()> {
+    if let Some(h) = state.pubsub.lock().remove(&id) {
+        h.abort();
+    }
     state.manager.disconnect(&id).await;
     store::remove(&app, &id).await?;
     store::kc_delete(&id);
@@ -102,6 +109,9 @@ pub async fn remove_saved_connection(
 
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    if let Some(h) = state.pubsub.lock().remove(&id) {
+        h.abort();
+    }
     state.manager.disconnect(&id).await;
     Ok(())
 }
@@ -511,6 +521,148 @@ pub async fn key_edit(
     edit: KeyEdit,
 ) -> AppResult<u64> {
     state.manager.key_edit(&id, &database, &key, &edit).await
+}
+
+// ---- Redis 進階：成員分頁 / 維運面板 / Pub-Sub（對齊 Another Redis Desktop Manager）----
+
+/// 分頁讀取大型集合鍵成員（hash/set/zset 游標式；list LRANGE 視窗）。
+#[tauri::command]
+pub async fn redis_key_page(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    key: String,
+    cursor: u64,
+    count: usize,
+    filter: String,
+) -> AppResult<KeyPage> {
+    state
+        .manager
+        .redis_driver(&id)?
+        .key_page(&database, &key, cursor, count, &filter)
+        .await
+}
+
+/// 慢查詢日誌（SLOWLOG GET）。
+#[tauri::command]
+pub async fn redis_slowlog(
+    state: State<'_, AppState>,
+    id: String,
+    count: i64,
+) -> AppResult<Vec<SlowLogEntry>> {
+    state.manager.redis_driver(&id)?.slowlog(count).await
+}
+
+/// 用戶端連線清單（CLIENT LIST）。
+#[tauri::command]
+pub async fn redis_clients(state: State<'_, AppState>, id: String) -> AppResult<Vec<ClientInfo>> {
+    state.manager.redis_driver(&id)?.clients().await
+}
+
+/// 中斷指定用戶端（CLIENT KILL ID）。
+#[tauri::command]
+pub async fn redis_client_kill(
+    state: State<'_, AppState>,
+    id: String,
+    client_id: String,
+) -> AppResult<()> {
+    state.manager.redis_driver(&id)?.client_kill(&client_id).await
+}
+
+/// 大鍵掃描（SCAN 取樣 + MEMORY USAGE，回前 top 名）。
+#[tauri::command]
+pub async fn redis_big_keys(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    sample: usize,
+    top: usize,
+) -> AppResult<Vec<BigKey>> {
+    state.manager.redis_driver(&id)?.big_keys(&database, sample, top).await
+}
+
+/// 發佈訊息（PUBLISH），回傳收到訊息的訂閱者數。
+#[tauri::command]
+pub async fn redis_publish(
+    state: State<'_, AppState>,
+    id: String,
+    channel: String,
+    message: String,
+) -> AppResult<i64> {
+    state.manager.redis_driver(&id)?.publish(&channel, &message).await
+}
+
+/// 推送給前端的 Pub/Sub 訊息（事件 `redis-pubsub`）。
+#[derive(Clone, Serialize)]
+struct PubSubMessage {
+    conn_id: String,
+    channel: String,
+    pattern: Option<String>,
+    payload: String,
+}
+
+/// 訂閱頻道 / 樣式：背景任務持有專屬 pub/sub 連線，收到訊息以 `redis-pubsub` 事件推給前端。
+/// 重新呼叫會取代既有訂閱（先 abort 舊任務）。
+#[tauri::command]
+pub async fn redis_subscribe(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    channels: Vec<String>,
+    patterns: Vec<String>,
+) -> AppResult<()> {
+    let driver = state.manager.redis_driver(&id)?;
+    let client = driver.pubsub_client();
+    // 重新訂閱 = 取代：先收掉舊任務。
+    if let Some(h) = state.pubsub.lock().remove(&id) {
+        h.abort();
+    }
+
+    let app2 = app.clone();
+    let id2 = id.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        use futures::StreamExt;
+        let mut pubsub = match client.get_async_pubsub().await {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = app2.emit("redis-pubsub-error", format!("{id2}: {e}"));
+                return;
+            }
+        };
+        for c in &channels {
+            if let Err(e) = pubsub.subscribe(c).await {
+                let _ = app2.emit("redis-pubsub-error", format!("{id2}: subscribe {c} 失敗：{e}"));
+            }
+        }
+        for p in &patterns {
+            if let Err(e) = pubsub.psubscribe(p).await {
+                let _ = app2.emit("redis-pubsub-error", format!("{id2}: psubscribe {p} 失敗：{e}"));
+            }
+        }
+        let mut stream = pubsub.on_message();
+        while let Some(msg) = stream.next().await {
+            let channel = msg.get_channel_name().to_string();
+            let payload: String = msg.get_payload().unwrap_or_else(|_| {
+                String::from_utf8_lossy(msg.get_payload_bytes()).into_owned()
+            });
+            let pattern = msg.get_pattern::<String>().ok();
+            let _ = app2.emit(
+                "redis-pubsub",
+                PubSubMessage { conn_id: id2.clone(), channel, pattern, payload },
+            );
+        }
+    });
+    state.pubsub.lock().insert(id, handle);
+    Ok(())
+}
+
+/// 取消訂閱：收掉該連線的 pub/sub 背景任務。
+#[tauri::command]
+pub async fn redis_unsubscribe(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    if let Some(h) = state.pubsub.lock().remove(&id) {
+        h.abort();
+    }
+    Ok(())
 }
 
 // ---- 排程備份 + 備份歷史 ----

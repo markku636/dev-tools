@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type DbKind = "mysql" | "postgres" | "mongo" | "redis" | "sqlite";
 
@@ -212,6 +213,68 @@ export interface RedisKeys {
   truncated: boolean;
 }
 
+// 大型集合鍵的分頁讀取結果（hash/set/zset 游標式；list LRANGE 視窗）。
+// cursor === 0 表示已掃描完成；total 為集合總長（-1 表未知）。
+export interface KeyPage {
+  type_: string;
+  ttl: number;
+  total: number;
+  cursor: number;
+  fields: string[];
+  members: string[];
+  scores: number[];
+}
+
+// SLOWLOG 單筆。
+export interface SlowLogEntry {
+  id: number;
+  time: number;        // Unix 秒
+  duration_us: number; // 微秒
+  command: string;
+  client: string;
+  client_name: string;
+}
+
+// CLIENT LIST 單筆。
+export interface ClientInfo {
+  id: string;
+  addr: string;
+  name: string;
+  age: string;
+  idle: string;
+  db: string;
+  cmd: string;
+  flags: string;
+}
+
+// 大鍵掃描單筆。
+export interface BigKey {
+  key: string;
+  type_: string;
+  bytes: number; // -1 表伺服器未回 MEMORY USAGE
+  ttl: number;
+}
+
+// Pub/Sub 推播訊息（後端事件 `redis-pubsub` 的 payload）。
+export interface PubSubMessage {
+  conn_id: string;
+  channel: string;
+  pattern: string | null;
+  payload: string;
+}
+
+// 訂閱後端推播的 Pub/Sub 訊息（僅回呼符合 connId 的訊息）。回傳取消監聽函式。
+export function onRedisPubSub(connId: string, cb: (m: PubSubMessage) => void): Promise<UnlistenFn> {
+  return listen<PubSubMessage>("redis-pubsub", (e) => {
+    if (e.payload.conn_id === connId) cb(e.payload);
+  });
+}
+
+// 訂閱 Pub/Sub 背景任務錯誤（payload 為字串）。回傳取消監聽函式。
+export function onRedisPubSubError(cb: (msg: string) => void): Promise<UnlistenFn> {
+  return listen<string>("redis-pubsub-error", (e) => cb(e.payload));
+}
+
 export interface BackupResult {
   path: string;
   bytes: number;
@@ -345,6 +408,21 @@ export const api = {
     invoke<ServerInfoSection[]>("server_info", { id }),
   redisKeys: (id: string, database: string, pattern: string, limit: number) =>
     invoke<RedisKeys>("redis_keys", { id, database, pattern, limit }),
+  // 大型集合鍵成員分頁（cursor 起點、count 每頁筆數、filter 成員/欄位過濾）。
+  redisKeyPage: (id: string, database: string, key: string, cursor: number, count: number, filter: string) =>
+    invoke<KeyPage>("redis_key_page", { id, database, key, cursor, count, filter }),
+  redisSlowlog: (id: string, count: number) =>
+    invoke<SlowLogEntry[]>("redis_slowlog", { id, count }),
+  redisClients: (id: string) => invoke<ClientInfo[]>("redis_clients", { id }),
+  redisClientKill: (id: string, clientId: string) =>
+    invoke<void>("redis_client_kill", { id, clientId }),
+  redisBigKeys: (id: string, database: string, sample: number, top: number) =>
+    invoke<BigKey[]>("redis_big_keys", { id, database, sample, top }),
+  redisPublish: (id: string, channel: string, message: string) =>
+    invoke<number>("redis_publish", { id, channel, message }),
+  redisSubscribe: (id: string, channels: string[], patterns: string[]) =>
+    invoke<void>("redis_subscribe", { id, channels, patterns }),
+  redisUnsubscribe: (id: string) => invoke<void>("redis_unsubscribe", { id }),
   backupDetectCli: (kind: DbKind) =>
     invoke<boolean>("backup_detect_cli", { kind }),
   backupRun: (config: ConnectionConfig, database: string, outPath: string) =>

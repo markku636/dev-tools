@@ -652,6 +652,16 @@ impl ConnectionManager {
         self.get(id)?.active.scan_keys(database, pattern, limit).await
     }
 
+    /// 取得 Redis driver 本體，供 Redis 專屬命令直接呼叫其 inherent 方法
+    /// （成員分頁 / SLOWLOG / CLIENT / 大鍵 / Pub-Sub），不必擴充 DatabaseDriver trait。
+    /// 非 Redis 連線回 Unsupported。
+    pub fn redis_driver(&self, id: &str) -> AppResult<Arc<RedisDriver>> {
+        match &self.get(id)?.active {
+            Active::Redis(d) => Ok(d.clone()),
+            _ => Err(AppError::Unsupported("此連線不是 Redis".into())),
+        }
+    }
+
     /// 主動關閉並移除單一連線（含其 tunnel）。
     pub async fn disconnect(&self, id: &str) {
         let removed = self.active.lock().remove(id);

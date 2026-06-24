@@ -1,6 +1,31 @@
 # Changelog
 
-## 跨五大資料庫功能強化 + 正確性修正 + 資料格 / 查詢編輯器 / UI/UX 打磨（本次）
+## Redis 功能對齊 Another Redis Desktop Manager（本次）
+
+把原本藏在右鍵選單的 Redis 操作搬上一眼可見的工具列，並補齊「另一款 Redis 工具」常用而本工具缺少的面板。
+
+> 驗證：前端 `tsc --noEmit` + `vite build` 綠燈；後端 `cargo check` 無錯誤、零新增警告。
+
+### 可見工具列（keys 檢視）
+- 開啟 Redis 連線的 keys 後，工具列直接出現 **＋新增鍵 / 📊狀態 / 📡Pub/Sub / 🛠維運 / ⌨命令列** 按鈕（先前僅能從連線 / DB 節點右鍵進入，不易發現）。
+- 新增鍵 / 伺服器狀態 / 命令列沿用既有對話框；刪除鍵、設定 TTL、重新命名仍可由鍵列右鍵或網格批次操作。
+
+### 值檢視與格式化 + 大型集合分頁
+- 鍵詳情的 String 值新增 **原始 / JSON / Hex** 檢視切換：JSON 自動美化（可回填）、Hex 經典 dump、顯示位元組數。
+- hash / list / set / zset 改用後端**游標式分頁**（HSCAN/SSCAN/ZSCAN、list 用 LRANGE 視窗），每頁 200 筆、可「載入更多」，大鍵不再一次全載卡死。
+- **成員 / 欄位過濾**：hash 比對 field、set/zset 比對 member（支援 `* ?`）、list 子字串。
+
+### Pub/Sub 訂閱與發佈
+- 新面板可訂閱頻道 / 樣式（`PSUBSCRIBE`），訊息經後端背景任務 + Tauri 事件即時推送；可暫停 / 清空 / 發佈訊息（回報訂閱者數）。
+- 訂閱連線獨立持有；面板關閉、連線中斷或移除連線時自動取消訂閱、收掉背景任務（防洩漏）。
+
+### 維運面板
+- **慢查詢**（`SLOWLOG GET`，可 RESET）、**用戶端**（`CLIENT LIST`，可逐一 `CLIENT KILL`）、**大鍵**（`SCAN` 取樣 + `MEMORY USAGE`，依用量排序取前 N）。
+
+### 後端
+- 新增 Redis 專屬命令：`redis_key_page` / `redis_slowlog` / `redis_clients` / `redis_client_kill` / `redis_big_keys` / `redis_publish` / `redis_subscribe` / `redis_unsubscribe`，透過 `manager.redis_driver()` 取得 driver 本體直呼 inherent 方法（不必擴充 `DatabaseDriver` trait 與五驅動 dispatch）。
+
+## 跨五大資料庫功能強化 + 正確性修正 + 資料格 / 查詢編輯器 / UI/UX 打磨
 
 致敬 DBeaver / TablePlus / DataGrip / Navicat 的日常手感與功能廣度：補強資料呈現正確性、跨資料庫功能對齊與操作效率。
 本批重點包含 **PostgreSQL 嚴格型別寫入修正**（整數 / 複合主鍵的列終於可編輯 / 刪除）、**MongoDB 完整查詢 + CRUD-via-JSON**（find / 聚合 / insert / update / delete）+ 索引管理、**CSV 匯入**、**整庫結構轉儲**、**欄位資料剖析**、**Ping 連線延遲**、`RETURNING` 顯示，以及多項由對抗式自我審查找出的細節修正（Excel BOM、多欄排序鍵序、空 filter 批次操作防護等）。

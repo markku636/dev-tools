@@ -1,9 +1,9 @@
 use redis::AsyncCommands;
 
 use crate::db::{
-    CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, KeyDetail, KeyEdit,
-    PagedData, PoolStatus, QueryResult, RedisKeys, RowDelete, RowInsert, ServerInfoSection,
-    TableInfo,
+    BigKey, CellEdit, ClientInfo, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver,
+    KeyDetail, KeyEdit, KeyPage, PagedData, PoolStatus, QueryResult, RedisKeys, RowDelete,
+    RowInsert, ServerInfoSection, SlowLogEntry, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -32,6 +32,292 @@ impl RedisDriver {
             .get_multiplexed_tokio_connection()
             .await
             .map_err(|e| AppError::Connect(e.to_string()))
+    }
+
+    /// 預設（DB 0）的伺服器層連線，供不綁特定 DB 的維運指令（SLOWLOG / CLIENT 等）使用。
+    async fn admin_conn(&self) -> AppResult<redis::aio::MultiplexedConnection> {
+        self.client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|e| AppError::Connect(e.to_string()))
+    }
+
+    // ===== 以下為 Redis 專屬「另一款 Redis 工具」對齊功能（inherent 方法，
+    //       由 commands::redis_* 透過 manager.redis_driver 直接呼叫，不經 DatabaseDriver trait）=====
+
+    /// Pub/Sub 用的 client（複製連線設定即可；實際訂閱連線於背景任務中建立）。
+    pub fn pubsub_client(&self) -> redis::Client {
+        self.client.clone()
+    }
+
+    /// 分頁讀取集合型鍵的成員（大鍵不再一次全載）。
+    /// - hash/set/zset：游標式 HSCAN/SSCAN/ZSCAN（MATCH 過濾欄位 / 成員名）。
+    /// - list：以 cursor 當 LRANGE 視窗起點；filter 為非空時於本頁以子字串過濾。
+    /// - string：忽略分頁，回單一值。
+    pub async fn key_page(
+        &self,
+        database: &str,
+        key: &str,
+        cursor: u64,
+        count: usize,
+        filter: &str,
+    ) -> AppResult<KeyPage> {
+        let mut conn = self.conn(database).await?;
+        let to_err = |e: redis::RedisError| AppError::Query(e.to_string());
+        let ktype: String = redis::cmd("TYPE")
+            .arg(key)
+            .query_async(&mut conn)
+            .await
+            .map_err(to_err)?;
+        let ttl: i64 = redis::cmd("TTL").arg(key).query_async(&mut conn).await.unwrap_or(-1);
+        let count = count.clamp(1, 10_000);
+        // SCAN 家族的 MATCH：空 → "*"；含 glob 字元（* ?）原樣；否則以 *sub* 包夾成子字串比對。
+        let match_pat = if filter.is_empty() {
+            "*".to_string()
+        } else if filter.contains('*') || filter.contains('?') {
+            filter.to_string()
+        } else {
+            format!("*{filter}*")
+        };
+
+        let mut page = KeyPage {
+            type_: ktype.clone(),
+            ttl,
+            total: -1,
+            cursor: 0,
+            fields: Vec::new(),
+            members: Vec::new(),
+            scores: Vec::new(),
+        };
+
+        match ktype.as_str() {
+            "string" => {
+                let v: Option<String> = conn.get(key).await.map_err(to_err)?;
+                page.members = vec![v.unwrap_or_default()];
+                page.total = 1;
+            }
+            "list" => {
+                let total: i64 =
+                    redis::cmd("LLEN").arg(key).query_async(&mut conn).await.unwrap_or(-1);
+                page.total = total;
+                let start = cursor as i64;
+                let stop = start + count as i64 - 1;
+                let items: Vec<String> = redis::cmd("LRANGE")
+                    .arg(key)
+                    .arg(start)
+                    .arg(stop)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(to_err)?;
+                let fetched = items.len();
+                page.members = if filter.is_empty() {
+                    items
+                } else {
+                    items.into_iter().filter(|s| s.contains(filter)).collect()
+                };
+                // fetched < count → 已是最後一頁（LRANGE 回不滿即代表到底）；否則下一視窗起點。
+                page.cursor = if fetched < count {
+                    0
+                } else {
+                    (start + fetched as i64) as u64
+                };
+            }
+            "set" => {
+                page.total = redis::cmd("SCARD").arg(key).query_async(&mut conn).await.unwrap_or(-1);
+                // SCAN COUNT 僅為提示，單次可能回很少；迴圈累積到接近一頁或掃完，避免「載入更多」常拿到空批。
+                let mut cur = cursor;
+                loop {
+                    let (next, batch): (u64, Vec<String>) = redis::cmd("SSCAN")
+                        .arg(key)
+                        .arg(cur)
+                        .arg("MATCH")
+                        .arg(&match_pat)
+                        .arg("COUNT")
+                        .arg(count)
+                        .query_async(&mut conn)
+                        .await
+                        .map_err(to_err)?;
+                    page.members.extend(batch);
+                    cur = next;
+                    if cur == 0 || page.members.len() >= count {
+                        break;
+                    }
+                }
+                page.cursor = cur;
+            }
+            "hash" => {
+                page.total = redis::cmd("HLEN").arg(key).query_async(&mut conn).await.unwrap_or(-1);
+                let mut cur = cursor;
+                loop {
+                    let (next, batch): (u64, Vec<String>) = redis::cmd("HSCAN")
+                        .arg(key)
+                        .arg(cur)
+                        .arg("MATCH")
+                        .arg(&match_pat)
+                        .arg("COUNT")
+                        .arg(count)
+                        .query_async(&mut conn)
+                        .await
+                        .map_err(to_err)?;
+                    // batch 為 field, value 交錯。
+                    let mut it = batch.into_iter();
+                    while let (Some(f), Some(v)) = (it.next(), it.next()) {
+                        page.fields.push(f);
+                        page.members.push(v);
+                    }
+                    cur = next;
+                    if cur == 0 || page.members.len() >= count {
+                        break;
+                    }
+                }
+                page.cursor = cur;
+            }
+            "zset" => {
+                page.total = redis::cmd("ZCARD").arg(key).query_async(&mut conn).await.unwrap_or(-1);
+                let mut cur = cursor;
+                loop {
+                    let (next, batch): (u64, Vec<String>) = redis::cmd("ZSCAN")
+                        .arg(key)
+                        .arg(cur)
+                        .arg("MATCH")
+                        .arg(&match_pat)
+                        .arg("COUNT")
+                        .arg(count)
+                        .query_async(&mut conn)
+                        .await
+                        .map_err(to_err)?;
+                    // batch 為 member, score 交錯。
+                    let mut it = batch.into_iter();
+                    while let (Some(m), Some(s)) = (it.next(), it.next()) {
+                        page.members.push(m);
+                        page.scores.push(s.parse::<f64>().unwrap_or(0.0));
+                    }
+                    cur = next;
+                    if cur == 0 || page.members.len() >= count {
+                        break;
+                    }
+                }
+                page.cursor = cur;
+            }
+            _ => {}
+        }
+        Ok(page)
+    }
+
+    /// 慢查詢日誌（SLOWLOG GET count）。
+    pub async fn slowlog(&self, count: i64) -> AppResult<Vec<SlowLogEntry>> {
+        let mut conn = self.admin_conn().await?;
+        let val: redis::Value = redis::cmd("SLOWLOG")
+            .arg("GET")
+            .arg(count.max(1))
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        let mut out = Vec::new();
+        if let redis::Value::Array(entries) = val {
+            for e in entries {
+                if let redis::Value::Array(f) = e {
+                    let command = match f.get(3) {
+                        Some(redis::Value::Array(args)) => {
+                            args.iter().map(rv_to_string).collect::<Vec<_>>().join(" ")
+                        }
+                        _ => String::new(),
+                    };
+                    out.push(SlowLogEntry {
+                        id: rv_as_i64(f.get(0)),
+                        time: rv_as_i64(f.get(1)),
+                        duration_us: rv_as_i64(f.get(2)),
+                        command,
+                        client: f.get(4).map(rv_to_string).unwrap_or_default(),
+                        client_name: f.get(5).map(rv_to_string).unwrap_or_default(),
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// 用戶端連線清單（CLIENT LIST，逐行解析 key=value）。
+    pub async fn clients(&self) -> AppResult<Vec<ClientInfo>> {
+        let mut conn = self.admin_conn().await?;
+        let raw: String = redis::cmd("CLIENT")
+            .arg("LIST")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(parse_client_list(&raw))
+    }
+
+    /// 中斷指定用戶端（CLIENT KILL ID <id>）。
+    pub async fn client_kill(&self, client_id: &str) -> AppResult<()> {
+        let mut conn = self.admin_conn().await?;
+        let _: redis::Value = redis::cmd("CLIENT")
+            .arg("KILL")
+            .arg("ID")
+            .arg(client_id)
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 大鍵掃描：SCAN 取樣 sample 個鍵，逐一 MEMORY USAGE，回傳前 top 名。
+    /// 取樣式（非全量），避免在大型實例上長時間鎖佔；sample 上限保護。
+    pub async fn big_keys(&self, database: &str, sample: usize, top: usize) -> AppResult<Vec<BigKey>> {
+        let sample = sample.clamp(1, 100_000);
+        let top = top.clamp(1, 1_000);
+        let mut conn = self.conn(database).await?;
+        let to_err = |e: redis::RedisError| AppError::Query(e.to_string());
+        let mut all: Vec<BigKey> = Vec::new();
+        let mut scanned = 0usize;
+        let mut cursor: u64 = 0;
+        loop {
+            let (next, batch): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("COUNT")
+                .arg(500)
+                .query_async(&mut conn)
+                .await
+                .map_err(to_err)?;
+            for k in batch {
+                if scanned >= sample {
+                    break;
+                }
+                scanned += 1;
+                let bytes: i64 = redis::cmd("MEMORY")
+                    .arg("USAGE")
+                    .arg(&k)
+                    .query_async(&mut conn)
+                    .await
+                    .unwrap_or(-1);
+                let ktype: String = redis::cmd("TYPE")
+                    .arg(&k)
+                    .query_async(&mut conn)
+                    .await
+                    .unwrap_or_else(|_| "unknown".to_string());
+                let ttl: i64 =
+                    redis::cmd("TTL").arg(&k).query_async(&mut conn).await.unwrap_or(-1);
+                all.push(BigKey { key: k, type_: ktype, bytes, ttl });
+            }
+            cursor = next;
+            if cursor == 0 || scanned >= sample {
+                break;
+            }
+        }
+        all.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        all.truncate(top);
+        Ok(all)
+    }
+
+    /// 發佈訊息到頻道（PUBLISH），回傳收到的訂閱者數。
+    pub async fn publish(&self, channel: &str, message: &str) -> AppResult<i64> {
+        let mut conn = self.admin_conn().await?;
+        redis::cmd("PUBLISH")
+            .arg(channel)
+            .arg(message)
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))
     }
 }
 
@@ -698,4 +984,52 @@ fn redis_value_to_rows(v: &redis::Value) -> Vec<Vec<Option<String>>> {
             .collect(),
         other => vec![vec![Some(format!("{other:?}"))]],
     }
+}
+
+/// 將單一 redis::Value 攤成字串（供 SLOWLOG 等巢狀結果取值）。
+fn rv_to_string(v: &redis::Value) -> String {
+    match v {
+        redis::Value::Nil => String::new(),
+        redis::Value::Int(i) => i.to_string(),
+        redis::Value::SimpleString(s) => s.clone(),
+        redis::Value::Okay => "OK".to_string(),
+        redis::Value::BulkString(b) => String::from_utf8_lossy(b).into_owned(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// 從 redis::Value 取整數（接受 Int / 數字字串）。
+fn rv_as_i64(v: Option<&redis::Value>) -> i64 {
+    match v {
+        Some(redis::Value::Int(i)) => *i,
+        Some(redis::Value::BulkString(b)) => String::from_utf8_lossy(b).trim().parse().unwrap_or(0),
+        Some(redis::Value::SimpleString(s)) => s.trim().parse().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// 解析 `CLIENT LIST` 純文字：每行為空白分隔的 key=value。
+fn parse_client_list(raw: &str) -> Vec<ClientInfo> {
+    raw.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let mut m: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+            for tok in line.split_whitespace() {
+                if let Some((k, v)) = tok.split_once('=') {
+                    m.insert(k, v);
+                }
+            }
+            let get = |k: &str| m.get(k).map(|s| s.to_string()).unwrap_or_default();
+            ClientInfo {
+                id: get("id"),
+                addr: get("addr"),
+                name: get("name"),
+                age: get("age"),
+                idle: get("idle"),
+                db: get("db"),
+                cmd: get("cmd"),
+                flags: get("flags"),
+            }
+        })
+        .collect()
 }
