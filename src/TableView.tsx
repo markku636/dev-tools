@@ -288,6 +288,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
           setEdits({});
           setEditing(null);
           setSelected(null); // 重載後清除選取，避免指向已不存在的列
+          setRangeEnd(null); // 同時清除框選範圍（列索引在重載後可能失效）
         }
       })
       .catch((e) => !cancelled && setErr(e?.message ?? "讀取失敗"))
