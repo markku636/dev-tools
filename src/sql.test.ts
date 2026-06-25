@@ -4,6 +4,7 @@ import {
   splitSqlStatementsWithRanges,
   statementAtOffset,
   parseClipboardGrid,
+  rectToTsv,
   resultToCsv,
   resultToTsv,
   resultToJson,
@@ -180,6 +181,25 @@ describe("userListSql", () => {
     expect(s).toContain("account_locked");
     expect(s).toContain("max_user_connections");
     expect(s).toContain("ORDER BY User, Host");
+  });
+});
+
+describe("rectToTsv", () => {
+  const grid = [
+    ["a1", "b1", "c1"],
+    ["a2", null, "c2"],
+    ["a3", "b3", "c3"],
+  ];
+  const get = (r: number, c: number) => grid[r][c];
+  it("extracts a rectangle as TSV (rows × cols), NULL → empty", () => {
+    expect(rectToTsv(get, [0, 1], [0, 1])).toBe("a1\tb1\na2\t");
+    expect(rectToTsv(get, [1, 2], [1, 2])).toBe("\tc2\nb3\tc3");
+  });
+  it("respects the given column order (e.g. skipping a hidden middle column)", () => {
+    expect(rectToTsv(get, [0, 2], [0, 2])).toBe("a1\tc1\na3\tc3");
+  });
+  it("single cell → just that value", () => {
+    expect(rectToTsv(get, [2], [1])).toBe("b3");
   });
 });
 

@@ -811,6 +811,16 @@ export function splitSqlStatementsWithRanges(sql: string): SqlStatementSpan[] {
   return out;
 }
 
+// 將矩形範圍的儲存格擷取為 TSV（供資料表「區塊複製」）。getCell 取值（含待套用編輯），
+// rows / cols 為要納入的列索引 / 欄索引清單（已依可見欄序排好）。純函式，便於單元測試。
+export function rectToTsv(
+  getCell: (r: number, c: number) => string | null,
+  rows: number[],
+  cols: number[],
+): string {
+  return rows.map((r) => cols.map((c) => getCell(r, c) ?? "").join("\t")).join("\n");
+}
+
 // 解析剪貼簿的表格文字（TSV / 多行）為二維字串陣列，供資料表「區塊貼上」。
 // 去除尾端單一換行（避免多出一列空白）；單一純文字回傳 1×1。
 export function parseClipboardGrid(text: string): string[][] {

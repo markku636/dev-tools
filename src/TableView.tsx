@@ -12,7 +12,7 @@ import {
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard, useModalCount, useModalOverlay } from "./ui";
-import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, TYPE_PRESETS } from "./sql";
+import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, TYPE_PRESETS } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import RedisKeyTree from "./RedisKeyTree";
@@ -134,6 +134,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
   const [cellMenu, setCellMenu] = useState<{ r: number; c: number; x: number; y: number } | null>(null);
   const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
   const [selected, setSelected] = useState<{ r: number; c: number } | null>(null);
+  // 範圍選取（Shift+點選第二角）：null = 單格。Ctrl+C 複製整個矩形為 TSV。
+  const [rangeEnd, setRangeEnd] = useState<{ r: number; c: number } | null>(null);
   // 批次刪除：以目前頁列索引標記欲刪除的列（資料重載時清空，避免索引失效）。
   const [marked, setMarked] = useState<Set<number>>(new Set());
   const [insertInitial, setInsertInitial] = useState<Record<string, string | null> | undefined>(undefined);
@@ -310,6 +312,22 @@ function DataPane({ tab }: { tab: OpenTab }) {
   const guardDiscard = async (): Promise<boolean> =>
     dirtyCount === 0 ||
     (await uiConfirm("有未套用的變更，排序 / 篩選將重新載入並放棄。確定？", { title: "放棄變更", danger: true, confirmText: "放棄並繼續" }));
+  // 範圍選取矩形邊界（以可見欄序位計）：供儲存格判斷是否被框選、Ctrl+C 區塊複製定位。
+  const rangeVisIdx = data ? data.columns.map((_, j) => j).filter((j) => !isHidden(data.columns[j])) : [];
+  const rangeRect =
+    selected && rangeEnd
+      ? {
+          r1: Math.min(selected.r, rangeEnd.r),
+          r2: Math.max(selected.r, rangeEnd.r),
+          pmin: Math.min(rangeVisIdx.indexOf(selected.c), rangeVisIdx.indexOf(rangeEnd.c)),
+          pmax: Math.max(rangeVisIdx.indexOf(selected.c), rangeVisIdx.indexOf(rangeEnd.c)),
+        }
+      : null;
+  const inRange = (i: number, j: number): boolean => {
+    if (!rangeRect || i < rangeRect.r1 || i > rangeRect.r2) return false;
+    const p = rangeVisIdx.indexOf(j);
+    return p >= rangeRect.pmin && p <= rangeRect.pmax;
+  };
   // Redis 鍵列右鍵需定位 key / ttl 欄。
   const keyIdx = data ? data.columns.indexOf("key") : -1;
   const ttlIdx = data ? data.columns.indexOf("ttl") : -1;
@@ -365,6 +383,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
       else if (r > 0) { nr = r - 1; nc = visIdx[visIdx.length - 1]; } // 列首 Shift+Tab → 上一列末欄
     }
     setSelected({ r: nr, c: nc });
+    setRangeEnd(null);
     requestAnimationFrame(() => gridRef.current?.focus());
   };
 
@@ -652,9 +671,20 @@ function DataPane({ tab }: { tab: OpenTab }) {
     else if (k === "Enter" || k === "F2") {
       if (editable) { openEditor(r, c); e.preventDefault(); }
       return;
-    } else if (k === "Escape") { setSelected(null); return; }
+    } else if (k === "Escape") { setSelected(null); setRangeEnd(null); return; }
     else if ((e.ctrlKey || e.metaKey) && (k === "c" || k === "C")) {
-      copyCell(r, c); e.preventDefault(); return;
+      e.preventDefault();
+      if (rangeEnd) {
+        // 區塊複製：矩形範圍（含待套用編輯值）輸出為 TSV。
+        const r1 = Math.min(selected.r, rangeEnd.r), r2 = Math.max(selected.r, rangeEnd.r);
+        const p1 = visIdx.indexOf(selected.c), p2 = visIdx.indexOf(rangeEnd.c);
+        const cols = visIdx.slice(Math.min(p1, p2), Math.max(p1, p2) + 1);
+        const rowsRange = Array.from({ length: r2 - r1 + 1 }, (_, k2) => r1 + k2);
+        copyToClipboard(rectToTsv((rr, cc) => cellValue(rr, cc), rowsRange, cols), `已複製 ${rowsRange.length}×${cols.length} 區塊 (TSV)`);
+      } else {
+        copyCell(r, c);
+      }
+      return;
     }
     else if (editable && k === "Delete") {
       // Delete → 直接設為 NULL（最常見的破壞性編輯，免走右鍵選單）。
@@ -711,6 +741,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
     else return;
     e.preventDefault();
     setSelected({ r, c });
+    setRangeEnd(null); // 鍵盤導覽即重置範圍選取（範圍由 Shift+點選建立）
   };
 
   // ---- Redis 鍵列右鍵操作 ----
@@ -1072,7 +1103,9 @@ function DataPane({ tab }: { tab: OpenTab }) {
                       <td
                         key={j}
                         onClick={(e) => {
-                          setSelected({ r: i, c: j });
+                          // Shift+點選：以目前選取格為錨點框選矩形範圍（Ctrl+C 整塊複製）；一般點選則重置為單格。
+                          if (e.shiftKey && selected) setRangeEnd({ r: i, c: j });
+                          else { setSelected({ r: i, c: j }); setRangeEnd(null); }
                           (e.currentTarget.closest(".at-grid") as HTMLElement | null)?.focus();
                         }}
                         onDoubleClick={() => {
@@ -1090,9 +1123,9 @@ function DataPane({ tab }: { tab: OpenTab }) {
                         }
                         title={redisKeyCol ? "雙擊檢視鍵內容" : val ?? "NULL"}
                         className={`px-3 py-1 border-b border-fg/5 whitespace-nowrap overflow-hidden text-ellipsis ${
-                          dirty ? "bg-amber-500/15" : ""
-                        } ${
-                          selected?.r === i && selected?.c === j ? "ring-1 ring-inset ring-accent bg-accent/15" : ""
+                          selected?.r === i && selected?.c === j ? "ring-1 ring-inset ring-accent " : ""
+                        }${
+                          dirty ? "bg-amber-500/15" : selected?.r === i && selected?.c === j ? "bg-accent/15" : inRange(i, j) ? "bg-accent/10" : ""
                         } ${redisKeyCol ? "cursor-pointer text-blue-300" : editable ? "cursor-cell" : ""}`}
                       >
                         {isEditing ? (
