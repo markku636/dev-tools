@@ -184,6 +184,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
     }
     // 若隱藏的正是目前選取欄，清除選取，避免鍵盤導覽卡在不可見欄。
     if (data && selected && data.columns[selected.c] === c) setSelected(null);
+    setRangeEnd(null); // 隱藏欄會改變可見欄序位，清除框選範圍避免區塊複製定位錯誤
     setHiddenPersist(next);
   };
   const showAllColumns = () => setHiddenPersist([]);
