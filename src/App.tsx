@@ -848,6 +848,16 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
     useStore.getState().setActive(connId);
     useStore.getState().requestQuery(sql);
   };
+  // 對資料庫節點「新增查詢」：切到該連線的查詢編輯器，並以 USE / search_path 把後續查詢限定到此資料庫 / schema。
+  // SQLite 為單檔無多庫概念，僅切到查詢分頁（不覆寫既有內容）。
+  const newQueryForDb = (connId: string, db: string, kind: DbKind) => {
+    const starter =
+      kind === "mysql" ? `USE \`${db.replace(/`/g, "``")}\`;\n\n`
+      : kind === "postgres" ? `SET search_path TO "${db.replace(/"/g, '""')}";\n\n`
+      : null;
+    if (starter) sendQuery(connId, starter);
+    else { useStore.getState().setActive(connId); useStore.getState().setActiveTab("__query__"); }
+  };
   const genSelect = (m: TblRef) =>
     sendQuery(m.connId, `SELECT *\nFROM ${qualified(m.kind, m.db, m.table)}\nLIMIT 100;`);
   // 明列欄位的 SELECT（避免 SELECT *，便於刪減欄位；致敬 DataGrip / Navicat 的展開 *）。
@@ -1573,6 +1583,7 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                       const k = dbConn?.kind;
                       const noun = k === "postgres" ? "Schema" : "資料庫";
                       const arr: [string, () => void, boolean][] = [
+                        ["新增查詢", () => { if (dbConn) newQueryForDb(dbMenu.connId, dbMenu.db, dbConn.kind); }, false],
                         ["設計表結構…", () => { if (dbConn) setDesignTable({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }); }, false],
                       ];
                       // SQLite 為單檔，無多資料庫概念，故不顯示新增 / 刪除資料庫。
