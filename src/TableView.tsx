@@ -725,14 +725,25 @@ function DataPane({ tab }: { tab: OpenTab }) {
         const baseR = r;
         const baseC = c;
         const startPos = pos; // 選取格在可見欄中的序位
+        const rng = rangeEnd; // 框選範圍（用於單值填滿整塊）
         navigator.clipboard.readText()
           .then((txt) => {
             if (!txt) return;
             const grid = parseClipboardGrid(txt);
-            // 單格：直接貼到選取格（多行單一值請先 F2 進編輯器再貼）。
+            // 單格：有框選範圍則整塊填入同一值（Excel 慣例）；否則貼到選取格。
             if (grid.length === 1 && grid[0].length === 1) {
-              commitEdit(baseR, baseC, grid[0][0], false);
-              toast.success("已貼上到儲存格");
+              const v = grid[0][0];
+              if (rng) {
+                const r1 = Math.min(baseR, rng.r), r2 = Math.max(baseR, rng.r);
+                const p1 = visIdx.indexOf(baseC), p2 = visIdx.indexOf(rng.c);
+                const cols = visIdx.slice(Math.min(p1, p2), Math.max(p1, p2) + 1);
+                let n = 0;
+                for (let rr = r1; rr <= r2; rr++) for (const cc of cols) { commitEdit(rr, cc, v, false); n++; }
+                toast.success(`已填入 ${n} 格`);
+              } else {
+                commitEdit(baseR, baseC, v, false);
+                toast.success("已貼上到儲存格");
+              }
               return;
             }
             // 區塊貼上：以選取格為左上角，沿可見欄 / 列範圍展開（超出範圍者略過），暫存待套用。
