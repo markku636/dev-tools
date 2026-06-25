@@ -26,7 +26,7 @@ export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
       const others = list.filter((d) => d !== sourceDb);
       setDbs(others);
       if (others.length) setTarget(others[0]);
-    }).catch(() => {});
+    }).catch((e: any) => toast.error(e?.message ?? "讀取資料庫清單失敗"));
   }, [connId, sourceDb]);
 
   // 產生「缺少資料表」的 CREATE 語句（取來源端 DDL，於目標執行即補齊）。供使用者檢視 / 複製後執行。

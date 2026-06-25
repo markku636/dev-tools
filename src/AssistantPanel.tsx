@@ -352,8 +352,8 @@ export default function AssistantPanel() {
             {messages.map((m) => <MessageBubble key={m.id} msg={m} />)}
             {!streaming && messages[messages.length - 1].role === "assistant" && (
               <div className="flex justify-start">
-                <button type="button" onClick={regenerate}
-                  className="inline-flex items-center gap-1 text-[11px] text-fg/45 hover:text-fg border border-fg/10 rounded px-2 py-0.5 hover:bg-fg/5"><Icon icon={RefreshCw} size={13} /> 重新生成</button>
+                <button type="button" onClick={regenerate} disabled={notReady}
+                  className="inline-flex items-center gap-1 text-[11px] text-fg/45 hover:text-fg border border-fg/10 rounded px-2 py-0.5 hover:bg-fg/5 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg/45"><Icon icon={RefreshCw} size={13} /> 重新生成</button>
               </div>
             )}
           </>

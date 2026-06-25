@@ -80,9 +80,14 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
     }
   };
 
-  const handleSave = () => onSaved(build());
-
   const fileBased = KIND_META[kind].fileBased;
+  // 檔案型（SQLite）路徑可留空（用記憶體庫）；伺服器型至少需要主機，否則會存下無法連線的連線並立即設為作用中。
+  const valid = fileBased || host.trim() !== "";
+  const handleSave = () => { if (valid) onSaved(build()); };
+  // 文字輸入按 Enter 直接儲存（與其他對話框一致）。
+  const submitOnEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing && valid) { e.preventDefault(); handleSave(); }
+  };
 
   return (
     <Modal
@@ -98,7 +103,7 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
             測試連線
           </Button>
           <Button variant="secondary" onClick={onClose}>取消</Button>
-          <Button variant="primary" onClick={handleSave}>儲存</Button>
+          <Button variant="primary" onClick={handleSave} disabled={!valid}>儲存</Button>
         </>
       }
     >
@@ -121,7 +126,7 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
       </div>
 
       <Field label="名稱">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="選填" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={submitOnEnter} placeholder="選填" />
       </Field>
 
       {fileBased ? (
@@ -130,6 +135,7 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
             <Input
               value={database}
               onChange={(e) => setDatabase(e.target.value)}
+              onKeyDown={submitOnEnter}
               placeholder="例如 C:\\data\\app.db（留空則用記憶體資料庫）"
             />
             <BrowseButton
@@ -144,27 +150,28 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
         <>
           <div className="flex gap-3">
             <Field label="主機" className="flex-1">
-              <Input value={host} onChange={(e) => setHost(e.target.value)} />
+              <Input value={host} onChange={(e) => setHost(e.target.value)} onKeyDown={submitOnEnter} />
             </Field>
             <Field label="埠" className="w-24">
-              <Input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} />
+              <Input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} onKeyDown={submitOnEnter} />
             </Field>
           </div>
           <div className="flex gap-3">
             <Field label="使用者" className="flex-1">
-              <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={submitOnEnter} />
             </Field>
             <Field label="密碼" className="flex-1">
               <Input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={submitOnEnter}
                 placeholder={editing ? "留空＝不變更" : ""}
               />
             </Field>
           </div>
           <Field label="資料庫（選填）">
-            <Input value={database} onChange={(e) => setDatabase(e.target.value)} />
+            <Input value={database} onChange={(e) => setDatabase(e.target.value)} onKeyDown={submitOnEnter} />
           </Field>
         </>
       )}

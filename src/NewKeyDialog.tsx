@@ -46,6 +46,7 @@ export default function NewKeyDialog({ connId, database, onClose, onCreated }: {
           await api.keyEdit(connId, database, name, { action: "set_add", member: value });
           break;
         case "hash":
+          if (!field.trim()) { setErr("請輸入 hash field"); setBusy(false); return; }
           await api.keyEdit(connId, database, name, { action: "hash_set", field, value });
           break;
         case "zset": {
