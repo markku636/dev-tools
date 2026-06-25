@@ -1956,6 +1956,8 @@ function QueryPane() {
   const [editorSel, setEditorSel] = useState<string | null>(null);
   const [sql, setSql] = useState(() => loadPersistedSql(activeId, kind));
   const [result, setResult] = useState<QueryResult | null>(null);
+  // 結果表格目前的可視列（排序 + 篩選後）；複製 / 匯出依此而非原始 result，使輸出與所見一致。
+  const [resultView, setResultView] = useState<(string | null)[][] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState<number | null>(null);
@@ -2157,8 +2159,14 @@ function QueryPane() {
   }, []);
 
   // 匯出查詢結果到檔案：依副檔名選 CSV / JSON / TSV / Markdown。
+  // 複製 / 匯出的資料來源：若結果表格回報了可視列（且欄數相符）則用之（含排序 / 篩選），否則用原始結果。
+  const exportRes =
+    result && resultView && (resultView.length === 0 || resultView[0].length === result.columns.length)
+      ? { ...result, rows: resultView }
+      : result;
+
   const exportResult = async () => {
-    if (!result || result.columns.length === 0) return;
+    if (!result || result.columns.length === 0 || !exportRes) return;
     const path = await pickSaveFile("query-result.csv", [
       { name: "CSV", extensions: ["csv"] },
       { name: "JSON", extensions: ["json"] },
@@ -2168,15 +2176,15 @@ function QueryPane() {
     if (!path) return;
     const lower = path.toLowerCase();
     const content = lower.endsWith(".json")
-      ? resultToJson(result)
+      ? resultToJson(exportRes)
       : lower.endsWith(".md")
-      ? resultToMarkdown(result)
+      ? resultToMarkdown(exportRes)
       : lower.endsWith(".tsv") || lower.endsWith(".txt")
-      ? resultToTsv(result)
-      : resultToCsv(result);
+      ? resultToTsv(exportRes)
+      : resultToCsv(exportRes);
     try {
       await api.saveTextFile(path, content);
-      toast.success(`已匯出 ${result.rows.length} 列`);
+      toast.success(`已匯出 ${exportRes.rows.length} 列`);
     } catch (e: any) {
       toast.error(e?.message ?? "匯出失敗");
     }
@@ -2184,10 +2192,10 @@ function QueryPane() {
 
   // 把目前查詢與結果（限前 30 列）帶進 AI 助手分析。
   const askAiResult = () => {
-    if (!result || result.columns.length === 0) return;
+    if (!result || result.columns.length === 0 || !exportRes) return;
     const MAX = 30;
-    const limited: QueryResult = { ...result, rows: result.rows.slice(0, MAX) };
-    const note = result.rows.length > MAX ? `\n（僅附前 ${MAX} 列，共 ${result.rows.length} 列）` : "";
+    const limited: QueryResult = { ...exportRes, rows: exportRes.rows.slice(0, MAX) };
+    const note = exportRes.rows.length > MAX ? `\n（僅附前 ${MAX} 列，共 ${exportRes.rows.length} 列）` : "";
     const prompt =
       `以下是我在 at-kit 執行的查詢與結果，請幫我分析（資料意義、可能的異常或趨勢、可優化的查詢寫法，並可建議下一步查詢）：\n\n` +
       `查詢：\n\`\`\`sql\n${queryToRun()}\n\`\`\`\n\n結果：\n${resultToMarkdown(limited)}${note}`;
@@ -2348,14 +2356,14 @@ function QueryPane() {
           {rowsInfo && <span>{rowsInfo}</span>}
           {result && result.columns.length > 0 && (
             <div className="ml-auto flex gap-2">
-              <button type="button" onClick={() => copyToClipboard(resultToCsv(result), "已複製結果 (CSV)")}
-                className="hover:text-fg/80">複製 CSV</button>
-              <button type="button" onClick={() => copyToClipboard(resultToTsv(result), "已複製結果 (TSV)")}
-                className="hover:text-fg/80">複製 TSV</button>
-              <button type="button" onClick={() => copyToClipboard(resultToJson(result), "已複製結果 (JSON)")}
-                className="hover:text-fg/80">複製 JSON</button>
-              <button type="button" onClick={() => copyToClipboard(resultToMarkdown(result), "已複製結果 (Markdown)")}
-                className="hover:text-fg/80">複製 MD</button>
+              <button type="button" onClick={() => exportRes && copyToClipboard(resultToCsv(exportRes), "已複製結果 (CSV)")}
+                title="複製目前所見（含排序 / 篩選）" className="hover:text-fg/80">複製 CSV</button>
+              <button type="button" onClick={() => exportRes && copyToClipboard(resultToTsv(exportRes), "已複製結果 (TSV)")}
+                title="複製目前所見（含排序 / 篩選）" className="hover:text-fg/80">複製 TSV</button>
+              <button type="button" onClick={() => exportRes && copyToClipboard(resultToJson(exportRes), "已複製結果 (JSON)")}
+                title="複製目前所見（含排序 / 篩選）" className="hover:text-fg/80">複製 JSON</button>
+              <button type="button" onClick={() => exportRes && copyToClipboard(resultToMarkdown(exportRes), "已複製結果 (Markdown)")}
+                title="複製目前所見（含排序 / 篩選）" className="hover:text-fg/80">複製 MD</button>
               <button type="button" onClick={exportResult}
                 className="inline-flex items-center gap-1 hover:text-fg/80"><Icon icon={Download} size={12} />匯出</button>
               <button type="button" onClick={askAiResult} title="把這份結果帶進 AI 助手分析"
@@ -2366,7 +2374,7 @@ function QueryPane() {
       </div>
       <div className="flex-1 overflow-auto">
         {err && <div className="p-3 text-red-400 text-sm mono whitespace-pre-wrap break-words">{err}</div>}
-        {result && <ResultTable result={result} />}
+        {result && <ResultTable result={result} onViewChange={setResultView} />}
         {!result && !err && (
           <EmptyState
             compact
@@ -2381,7 +2389,7 @@ function QueryPane() {
   );
 }
 
-function ResultTable({ result }: { result: QueryResult }) {
+function ResultTable({ result, onViewChange }: { result: QueryResult; onViewChange?: (rows: (string | null)[][]) => void }) {
   const [selected, setSelected] = useState<{ r: number; c: number } | null>(null);
   // 範圍選取（Shift+點選第二角）：null = 單格。Ctrl+C 複製整個矩形為 TSV，狀態列顯示統計。
   const [rangeEnd, setRangeEnd] = useState<{ r: number; c: number } | null>(null);
@@ -2441,6 +2449,8 @@ function ResultTable({ result }: { result: QueryResult }) {
   }, [sortedRows, rfilter]);
   // 選取 / 框選為 viewRows 的位置索引；排序 / 篩選會重排 viewRows，故清除避免高亮指向錯誤列。
   useEffect(() => { setSelected(null); setRangeEnd(null); }, [sort, rfilter]);
+  // 將目前可視列（排序 + 篩選後）回報給父層，使複製 / 匯出與所見一致。
+  useEffect(() => { onViewChange?.(viewRows); }, [viewRows, onViewChange]);
 
   // 大結果集只渲染前 N 列，避免數萬列 DOM 卡死 UI；複製 / 匯出仍取全部。
   const MAX_RENDER = 2000;
