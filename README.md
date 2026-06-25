@@ -7,7 +7,7 @@
 <p align="center"><strong>MAGIDB CONNECT — Making Data Connections Magical</strong></p>
 
 <p align="center">
-一站式跨平台桌面資料庫工具，以單一 Navicat 風格介面管理<br>
+一站式跨平台桌面資料庫工具，以單一一致的介面管理<br>
 <strong>MySQL · PostgreSQL · SQLite · MongoDB · Redis</strong>。
 </p>
 
@@ -46,7 +46,7 @@
 - **一站式五大資料庫** — MySQL · PostgreSQL · SQLite · MongoDB · Redis，全部可實際連線，共用同一套連線樹、資料格與快捷鍵。
 - **輕量高效** — Tauri 2 架構，比 Electron 輕約 10×；深色為預設、可切亮色，依資料庫類型色標區分。
 - **安全可靠** — 連線密碼存於 OS keychain（磁碟不落地）、SSH Tunnel（密碼／私鑰）+ host key TOFU 驗證、所有寫入以主鍵定位 + 全參數化綁定防注入。
-- **Navicat 級手感** — 儲存格直接編輯、右鍵選單、鍵盤導覽、多欄排序、欄寬拖曳、依值篩選、內容檢視器、即時尋找。
+- **桌面級操作手感** — 儲存格直接編輯、右鍵選單、鍵盤導覽、多欄排序、欄寬拖曳、依值篩選、內容檢視器、即時尋找。
 - **內建 AI 助手** — 右側面板串接本機 Claude CLI（用你的 Claude 訂閱登入），串流回答資料庫問題、撰寫／優化 SQL，並可附帶目前連線的 schema 作上下文。
 - **完整工程實踐** — 後端以 Docker 真實五大資料庫做整合測試、前端純函式 vitest 覆蓋，經多輪對抗式自我審查修正安全與正確性問題（見 [CHANGELOG](./CHANGELOG.md)）。
 
@@ -68,7 +68,7 @@
 > Redis 仿 **Another Redis Desktop Manager**：五種結構檢視＋編輯、**命名空間鍵樹**（依 `:` 分組資料夾）、值格式化（原始 / JSON / Hex）、**Pub/Sub** 訂閱發佈、**維運面板**（慢查詢 / 用戶端 / 大鍵）、**伺服器狀態面板**（INFO 重點指標 + 全分區，可自動刷新）、**命令列 Console**（指令歷史、DB 切換）
 > 連線設定持久化（密碼存 OS keychain）、SSH Tunnel、排程備份 + 備份歷史、Ping 連線延遲、ER 圖、欄寬可拖曳、AI 助手
 
-完整規劃文件見 [`docs/`](./docs/)：[規劃](./docs/planning.md) · [架構](./docs/architecture.md) · [連線生命週期](./docs/connection-lifecycle.md) · [Navicat 操作習慣](./docs/navicat-ux.md) · [路線圖](./docs/roadmap.md)。變更紀錄見 [CHANGELOG](./CHANGELOG.md)。
+完整規劃文件見 [`docs/`](./docs/)：[規劃](./docs/planning.md) · [架構](./docs/architecture.md) · [連線生命週期](./docs/connection-lifecycle.md) · [資料表操作習慣](./docs/navicat-ux.md) · [路線圖](./docs/roadmap.md)。變更紀錄見 [CHANGELOG](./CHANGELOG.md)。
 
 ## 功能藍圖
 

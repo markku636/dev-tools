@@ -195,13 +195,34 @@ if ($SetVersion) {
     Write-Host "略過版本號遞增（-Bump none），照目前版本打包：$(Get-CurrentVersion)" -ForegroundColor DarkYellow
 }
 
+# --- 4.9 規避「target 目錄路徑問題」------------------------------------------
+# 在 Windows 上，Tauri 建置（tauri-codegen）會讀 target 目錄底下自動產生的權限檔
+# （target\release\build\tauri-*\out\permissions\*.toml）。本專案的 in-tree target
+# 曾殘留「舊位置／舊名稱」的絕對路徑：專案原本在 D:\at-kit，後來搬到目前含空白的
+# 路徑（D:\01 qen3_tts\...\db-kit）並改名 db-kit，但舊 target 內仍指向 D:\at-kit\...，
+# 導致讀檔失敗（os error 3，找不到路徑）而建置中止。此外 Tauri 在 Windows 對「含
+# 空白的路徑」本來就容易出狀況。
+# 解法：把 Rust 的 target 目錄改到一個「全新且不含空白」的位置，同時避開上述兩個
+# 問題；原始碼仍留在原處（前端 vite 對含空白的原路徑沒問題，不可改用 junction，
+# 否則 vite/realpath 會把路徑解回含空白的真實路徑而換成另一種錯）。
+$targetDir = Join-Path $PSScriptRoot "src-tauri\target"   # 預設：專案內 target（路徑無空白時用這個）
+if ($PSScriptRoot -match '\s') {
+    $relocated = Join-Path $env:LOCALAPPDATA "db-kit\rust-target"
+    if ($relocated -match '\s') {
+        Write-Host "警告：替代 target 目錄仍含空白（$relocated），Tauri 可能仍會失敗。請改用不含空白的路徑。" -ForegroundColor Red
+    }
+    $env:CARGO_TARGET_DIR = $relocated
+    $targetDir = $relocated
+    Write-Host "偵測到專案路徑含空白，已將 Rust target 目錄改到不含空白處：$relocated" -ForegroundColor Yellow
+}
+
 # --- 5. 打包 ---
 Write-Step "開始 tauri build（第一次會編譯 Rust，請耐心等候）"
 npm run tauri build
 Assert-LastExit "tauri build"
 
 # --- 完成 ---
-$bundleDir = "src-tauri\target\release\bundle"
+$bundleDir = Join-Path $targetDir "release\bundle"   # target 目錄可能已被改到不含空白處（見 4.9）
 Write-Step "打包完成"
 if (Test-Path $bundleDir) {
     Write-Host "安裝檔位於：" -ForegroundColor Green
