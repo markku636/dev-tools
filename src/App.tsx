@@ -2451,6 +2451,8 @@ function ResultTable({ result, onViewChange }: { result: QueryResult; onViewChan
   useEffect(() => { setSelected(null); setRangeEnd(null); }, [sort, rfilter]);
   // 將目前可視列（排序 + 篩選後）回報給父層，使複製 / 匯出與所見一致。
   useEffect(() => { onViewChange?.(viewRows); }, [viewRows, onViewChange]);
+  // 新查詢結果到達時重置排序 / 篩選 / 選取（避免沿用上一個查詢的狀態，例如欄序失效或舊篩選字）。
+  useEffect(() => { setSort(null); setRfilter(""); setSelected(null); setRangeEnd(null); }, [result]);
 
   // 大結果集只渲染前 N 列，避免數萬列 DOM 卡死 UI；複製 / 匯出仍取全部。
   const MAX_RENDER = 2000;
