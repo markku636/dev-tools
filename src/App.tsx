@@ -2430,6 +2430,8 @@ function ResultTable({ result }: { result: QueryResult }) {
     if (!q) return sortedRows;
     return sortedRows.filter((row) => row.some((v) => (v ?? "").toLowerCase().includes(q)));
   }, [sortedRows, rfilter]);
+  // 選取 / 框選為 viewRows 的位置索引；排序 / 篩選會重排 viewRows，故清除避免高亮指向錯誤列。
+  useEffect(() => { setSelected(null); setRangeEnd(null); }, [sort, rfilter]);
 
   // 大結果集只渲染前 N 列，避免數萬列 DOM 卡死 UI；複製 / 匯出仍取全部。
   const MAX_RENDER = 2000;
