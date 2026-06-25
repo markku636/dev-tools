@@ -595,6 +595,10 @@ function DataPane({ tab }: { tab: OpenTab }) {
     const items: ([string, () => void, boolean] | "sep")[] = [
       ["檢視內容…", () => setInspect({ r, c }), false],
       ["複製值", () => copyCell(r, c), false],
+      // 右鍵落在框選範圍內：提供整塊複製（滑鼠路徑，與 Ctrl+C 一致）。
+      ...(rangeEnd && inRange(r, c)
+        ? [["複製範圍 (TSV)", () => copyRange(), false] as [string, () => void, boolean]]
+        : []),
       ["複製整列 (JSON)", () => copyRowJson(r), false],
       ["複製整列 (TSV)", () => copyRowTsv(r), false],
       // INSERT 範本僅對 SQL 資料庫有意義（Mongo 用 JSON）。
@@ -616,6 +620,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
         ["編輯儲存格", () => openEditor(r, c), false],
         ["設為 NULL", () => commitEdit(r, c, "", true), false]
       );
+      // 框選範圍內：整塊設 NULL（滑鼠路徑，與 Delete 一致）。
+      if (rangeEnd && inRange(r, c)) items.push(["範圍設為 NULL", () => nullRange(), false]);
       // 此格有待套用編輯時，提供單格還原（不影響其他待套用編輯）。
       if (`${r}:${c}` in edits) items.push(["還原此格", () => revertCell(r, c), false]);
       items.push(
@@ -624,6 +630,29 @@ function DataPane({ tab }: { tab: OpenTab }) {
       );
     }
     return items;
+  };
+
+  // 框選範圍的列 / 可見欄邊界（錨點 = selected，遠端角 = rangeEnd）。欄被隱藏導致序位失效則回 null。
+  const rangeBounds = (): { r1: number; r2: number; cols: number[] } | null => {
+    if (!selected || !rangeEnd) return null;
+    const p1 = rangeVisIdx.indexOf(selected.c), p2 = rangeVisIdx.indexOf(rangeEnd.c);
+    if (p1 < 0 || p2 < 0) return null;
+    return {
+      r1: Math.min(selected.r, rangeEnd.r),
+      r2: Math.max(selected.r, rangeEnd.r),
+      cols: rangeVisIdx.slice(Math.min(p1, p2), Math.max(p1, p2) + 1),
+    };
+  };
+  const copyRange = () => {
+    const b = rangeBounds();
+    if (!b) return;
+    const rows = Array.from({ length: b.r2 - b.r1 + 1 }, (_, k) => b.r1 + k);
+    copyToClipboard(rectToTsv((rr, cc) => cellValue(rr, cc), rows, b.cols), `已複製 ${rows.length}×${b.cols.length} 區塊 (TSV)`);
+  };
+  const nullRange = () => {
+    const b = rangeBounds();
+    if (!b) return;
+    for (let rr = b.r1; rr <= b.r2; rr++) for (const cc of b.cols) commitEdit(rr, cc, "", true);
   };
 
   // 鍵盤導覽：方向鍵 / Tab 移動選取，Enter / F2 編輯，Ctrl+C 複製，Esc 取消選取，F5 重新整理。
@@ -689,30 +718,17 @@ function DataPane({ tab }: { tab: OpenTab }) {
       return;
     } else if (k === "Escape") { setSelected(null); setRangeEnd(null); return; }
     else if ((e.ctrlKey || e.metaKey) && (k === "c" || k === "C")) {
+      // 區塊複製：矩形範圍（含待套用編輯值）輸出為 TSV；無範圍則複製單格。
       e.preventDefault();
-      if (rangeEnd) {
-        // 區塊複製：矩形範圍（含待套用編輯值）輸出為 TSV。
-        const r1 = Math.min(selected.r, rangeEnd.r), r2 = Math.max(selected.r, rangeEnd.r);
-        const p1 = visIdx.indexOf(selected.c), p2 = visIdx.indexOf(rangeEnd.c);
-        const cols = visIdx.slice(Math.min(p1, p2), Math.max(p1, p2) + 1);
-        const rowsRange = Array.from({ length: r2 - r1 + 1 }, (_, k2) => r1 + k2);
-        copyToClipboard(rectToTsv((rr, cc) => cellValue(rr, cc), rowsRange, cols), `已複製 ${rowsRange.length}×${cols.length} 區塊 (TSV)`);
-      } else {
-        copyCell(r, c);
-      }
+      if (rangeEnd) copyRange();
+      else copyCell(r, c);
       return;
     }
     else if (editable && k === "Delete") {
       // Delete → 設為 NULL（最常見的破壞性編輯，免走右鍵選單）。有框選範圍則整塊設 NULL。
       e.preventDefault();
-      if (rangeEnd) {
-        const r1 = Math.min(selected.r, rangeEnd.r), r2 = Math.max(selected.r, rangeEnd.r);
-        const p1 = visIdx.indexOf(selected.c), p2 = visIdx.indexOf(rangeEnd.c);
-        const cols = visIdx.slice(Math.min(p1, p2), Math.max(p1, p2) + 1);
-        for (let rr = r1; rr <= r2; rr++) for (const cc of cols) commitEdit(rr, cc, "", true);
-      } else {
-        commitEdit(r, c, "", true);
-      }
+      if (rangeEnd) nullRange();
+      else commitEdit(r, c, "", true);
       return;
     }
     else if (editable && k === "Backspace") {
