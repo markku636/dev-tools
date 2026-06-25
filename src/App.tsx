@@ -2585,7 +2585,19 @@ function ResultTable({ result }: { result: QueryResult }) {
             const rowSel = selected?.r === i;
             return (
             <tr key={i} className={rowSel ? "bg-accent/[0.06]" : "hover:bg-fg/5"}>
-              <td className={`px-3 py-1 border-b border-fg/5 text-fg/30 tabular-nums ${rowSel ? "text-accent/90" : "bg-fg/[0.015]"}`}>{i + 1}</td>
+              <td
+                onClick={(e) => {
+                  // 與資料表格一致：點列號看整列表單；Shift+點選整列（接著 Ctrl+C 複製整列 / 看統計）。
+                  const lastC = result.columns.length - 1;
+                  if (e.shiftKey) {
+                    const anchorR = selected ? selected.r : i;
+                    setSelected({ r: anchorR, c: 0 });
+                    setRangeEnd({ r: i, c: lastC });
+                    (e.currentTarget.closest("[tabindex]") as HTMLElement | null)?.focus();
+                  } else setRowDetail(i);
+                }}
+                title="點看整列表單、Shift+點選整列"
+                className={`px-3 py-1 border-b border-fg/5 text-fg/30 tabular-nums cursor-pointer select-none hover:bg-fg/5 hover:text-fg/60 ${rowSel ? "text-accent/90" : "bg-fg/[0.015]"}`}>{i + 1}</td>
               {row.map((c, j) => (
                 <td key={j}
                   ref={activeCell?.r === i && activeCell?.c === j ? activeCellRef : undefined}

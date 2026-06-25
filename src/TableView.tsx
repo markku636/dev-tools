@@ -1155,8 +1155,16 @@ function DataPane({ tab }: { tab: OpenTab }) {
                     </td>
                   )}
                   <td
-                    onClick={() => setRowDetail(i)}
-                    title="檢視整列"
+                    onClick={(e) => {
+                      // 點列號看整列表單；Shift+點選整列（沿可見欄全寬，接著 Ctrl+C 複製整列 / 看統計）。
+                      if (e.shiftKey && rangeVisIdx.length > 0) {
+                        const anchorR = selected ? selected.r : i;
+                        setSelected({ r: anchorR, c: rangeVisIdx[0] });
+                        setRangeEnd({ r: i, c: rangeVisIdx[rangeVisIdx.length - 1] });
+                        gridRef.current?.focus();
+                      } else setRowDetail(i);
+                    }}
+                    title="點看整列表單、Shift+點選整列"
                     className={`px-3 py-1 border-b border-fg/5 cursor-pointer hover:bg-fg/5 hover:text-fg/60 tabular-nums ${
                       marked.has(i) ? "text-red-300 bg-red-500/10" : selected?.r === i ? "text-accent/90" : "text-fg/30"
                     }`}
