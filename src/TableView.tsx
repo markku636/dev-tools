@@ -1198,7 +1198,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
                             ? undefined
                             : (e) => {
                                 e.preventDefault();
-                                setSelected({ r: i, c: j });
+                                // 右鍵落在框選範圍內時保留範圍（供「複製範圍 / 範圍設為 NULL」）；否則重置為單格。
+                                if (!(rangeEnd && inRange(i, j))) { setSelected({ r: i, c: j }); setRangeEnd(null); }
                                 setCellMenu({ r: i, c: j, x: e.clientX, y: e.clientY });
                               }
                         }

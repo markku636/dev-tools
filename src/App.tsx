@@ -2413,14 +2413,6 @@ function ResultTable({ result, onViewChange }: { result: QueryResult; onViewChan
     };
   }, [rowDetail]);
 
-  if (result.columns.length === 0) {
-    return (
-      <div className="p-3 text-fg/50 text-sm">
-        影響列數：{result.rows_affected}
-      </div>
-    );
-  }
-
   // 點欄位標題做 client-side 排序（asc → desc → 無）；數字欄以數值比較，NULL 最後。
   const [sort, setSort] = useState<{ c: number; dir: "asc" | "desc" } | null>(null);
   const sortedRows = useMemo(() => {
@@ -2554,6 +2546,16 @@ function ResultTable({ result, onViewChange }: { result: QueryResult; onViewChan
     if (e.shiftKey) setRangeEnd({ r: nr, c: nc });
     else { setSelected({ r: nr, c: nc }); setRangeEnd(null); }
   };
+
+  // 非 SELECT（無欄位）只顯示影響列數。放在所有 hooks 之後，避免同一實例在 SELECT↔非 SELECT
+  // 切換時 hook 數量改變而觸發 React「rendered fewer/more hooks」錯誤。
+  if (result.columns.length === 0) {
+    return (
+      <div className="p-3 text-fg/50 text-sm">
+        影響列數：{result.rows_affected}
+      </div>
+    );
+  }
 
   return (
     <div className="outline-none" tabIndex={0} onKeyDown={onKey}>
