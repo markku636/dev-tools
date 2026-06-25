@@ -852,8 +852,8 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
   // SQLite 為單檔無多庫概念，僅切到查詢分頁（不覆寫既有內容）。
   const newQueryForDb = (connId: string, db: string, kind: DbKind) => {
     const starter =
-      kind === "mysql" ? `USE \`${db.replace(/`/g, "``")}\`;\n\n`
-      : kind === "postgres" ? `SET search_path TO "${db.replace(/"/g, '""')}";\n\n`
+      db && kind === "mysql" ? `USE \`${db.replace(/`/g, "``")}\`;\n\n`
+      : db && kind === "postgres" ? `SET search_path TO "${db.replace(/"/g, '""')}";\n\n`
       : null;
     if (starter) sendQuery(connId, starter);
     else { useStore.getState().setActive(connId); useStore.getState().setActiveTab("__query__"); }
@@ -1503,6 +1503,9 @@ function Sidebar({ onEdit }: { onEdit: (c: ConnectionConfig) => void }) {
                 [connectedIds.has(menu.id) ? "中斷連線" : "連線", () => toggleConnect(menu.id), false],
                 ...(connectedIds.has(menu.id)
                   ? [["重新整理資料庫", () => refreshDbs(menu.id), false] as [string, () => void, boolean]]
+                  : []),
+                ...(connectedIds.has(menu.id) && (menuConn.kind === "mysql" || menuConn.kind === "postgres" || menuConn.kind === "sqlite")
+                  ? [["新增查詢", () => newQueryForDb(menuConn.id, menuConn.database ?? "", menuConn.kind), false] as [string, () => void, boolean]]
                   : []),
                 ...(connectedIds.has(menu.id) && menuConn.kind === "redis"
                   ? [
