@@ -2,7 +2,7 @@ import { useState } from "react";
 import { KeyRound } from "lucide-react";
 import { api } from "./api";
 import { toast } from "./ui";
-import { Modal, Button } from "./ui/index";
+import { Modal, Button, Input, Textarea } from "./ui/index";
 
 type RType = "string" | "list" | "set" | "hash" | "zset";
 
@@ -82,8 +82,7 @@ export default function NewKeyDialog({ connId, database, onClose, onCreated }: {
 
           <div className="space-y-1">
             <label className="text-xs text-fg/50">鍵名</label>
-            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 user:1000"
-              className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent" />
+            <Input autoFocus inputSize="md" className="mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 user:1000" />
           </div>
 
           <div className="space-y-1">
@@ -91,7 +90,7 @@ export default function NewKeyDialog({ connId, database, onClose, onCreated }: {
             <div className="flex gap-1">
               {TYPES.map((t) => (
                 <button key={t.v} type="button" onClick={() => setType(t.v)}
-                  className={`px-2.5 py-1 text-xs rounded ${type === t.v ? "bg-blue-600 text-fg" : "bg-fg/5 text-fg/60 hover:bg-fg/10"}`}>
+                  className={`px-2.5 py-1 text-xs rounded ${type === t.v ? "bg-accent text-white" : "bg-fg/5 text-fg/60 hover:bg-fg/10"}`}>
                   {t.label}
                 </button>
               ))}
@@ -101,15 +100,13 @@ export default function NewKeyDialog({ connId, database, onClose, onCreated }: {
           {type === "hash" && (
             <div className="space-y-1">
               <label className="text-xs text-fg/50">field</label>
-              <input aria-label="field" value={field} onChange={(e) => setField(e.target.value)}
-                className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent" />
+              <Input aria-label="field" inputSize="md" className="mono" value={field} onChange={(e) => setField(e.target.value)} />
             </div>
           )}
           {type === "zset" && (
             <div className="space-y-1">
               <label className="text-xs text-fg/50">score</label>
-              <input aria-label="score" type="number" value={score} onChange={(e) => setScore(e.target.value)}
-                className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent" />
+              <Input aria-label="score" type="number" inputSize="md" className="mono" value={score} onChange={(e) => setScore(e.target.value)} />
             </div>
           )}
 
@@ -117,8 +114,8 @@ export default function NewKeyDialog({ connId, database, onClose, onCreated }: {
             <label className="text-xs text-fg/50">
               {type === "string" ? "value" : type === "set" || type === "zset" ? "member" : "value"}
             </label>
-            <textarea aria-label="值" value={value} onChange={(e) => setValue(e.target.value)} rows={type === "string" ? 4 : 2}
-              className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent resize-none break-all" />
+            <Textarea aria-label="值" value={value} onChange={(e) => setValue(e.target.value)} rows={type === "string" ? 4 : 2}
+              className="mono resize-none break-all" />
           </div>
     </Modal>
   );
