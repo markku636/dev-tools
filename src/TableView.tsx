@@ -682,6 +682,14 @@ function DataPane({ tab }: { tab: OpenTab }) {
       if (dirtyCount > 0) applyEdits();
       return;
     }
+    // Ctrl+A：框選整頁所有可見儲存格（接著 Ctrl+C 複製整頁、或狀態列看統計）。
+    if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+      e.preventDefault();
+      if (data.rows.length === 0 || rangeVisIdx.length === 0) return;
+      setSelected({ r: 0, c: rangeVisIdx[0] });
+      setRangeEnd({ r: data.rows.length - 1, c: rangeVisIdx[rangeVisIdx.length - 1] });
+      return;
+    }
     if (!selected) return;
     const maxR = data.rows.length - 1;
     if (maxR < 0) return;

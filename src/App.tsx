@@ -393,6 +393,7 @@ function ShortcutsHelp({ onClose }: { onClose: () => void }) {
       ["直接打字", "覆寫式編輯該格"],
       ["Delete", "將選取格設為 NULL"],
       ["Shift+點選 / Shift+方向鍵", "框選矩形範圍（Ctrl+C 複製整塊、Delete 整塊設 NULL）"],
+      ["Ctrl+A", "框選整頁所有儲存格"],
       ["Ctrl+C / Ctrl+V", "複製 / 貼上（區塊 TSV；單值貼到框選範圍＝整塊填入）"],
       ["Ctrl+S", "套用待套用的儲存格編輯"],
       ["F5", "重新整理目前頁"],
@@ -2476,6 +2477,14 @@ function ResultTable({ result }: { result: QueryResult }) {
       // Esc 先關開啟中的選單，其次取消儲存格 / 範圍選取。
       if (menu || colMenu) { setMenu(null); setColMenu(null); }
       else { setSelected(null); setRangeEnd(null); }
+      return;
+    }
+    // Ctrl+A：框選整頁所有儲存格（接著 Ctrl+C 複製、或工具列看統計）。
+    if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+      e.preventDefault();
+      if (rendered.length === 0 || result.columns.length === 0) return;
+      setSelected({ r: 0, c: 0 });
+      setRangeEnd({ r: rendered.length - 1, c: result.columns.length - 1 });
       return;
     }
     if (!selected) return;
