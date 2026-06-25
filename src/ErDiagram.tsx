@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { KeyRound, Link2, Minus, Plus, X } from "lucide-react";
 import { api, ErModel, ErTable } from "./api";
+import Icon from "./ui/Icon";
+import { IconButton } from "./ui/index";
+import { useModalOverlay } from "./ui";
 
 const CARD_W = 210;
 const CANVAS_W = 2400;
@@ -7,7 +11,13 @@ const CANVAS_H = 1600;
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 2;
 
-export default function ErDiagram({ connId, onClose }: { connId: string; onClose: () => void }) {
+export default function ErDiagram({ connId, onClose, initialDb, focusTable }: {
+  connId: string;
+  onClose: () => void;
+  initialDb?: string;   // 開啟時預選的資料庫 / schema（由「逆向至模型」帶入該表所屬庫）
+  focusTable?: string;  // 開啟時高亮的資料表（突顯該表與其關聯）
+}) {
+  useModalOverlay(onClose); // Esc 關閉 + 計入 modalCount
   const [dbs, setDbs] = useState<string[]>([]);
   const [db, setDb] = useState("");
   const [model, setModel] = useState<ErModel | null>(null);
@@ -16,6 +26,8 @@ export default function ErDiagram({ connId, onClose }: { connId: string; onClose
   const [err, setErr] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [hovered, setHovered] = useState<string | null>(null);
+  // 「逆向至模型」聚焦的表：與 hovered 分開，避免一移動滑鼠就被清掉（hovered 由卡片 mouseenter/leave 驅動）。
+  const [focused, setFocused] = useState<string | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
   // 進行中拖曳的監聽卸載函式；卸載時用來移除 window 監聽，避免洩漏。
   const dragCleanup = useRef<(() => void) | null>(null);
@@ -26,9 +38,15 @@ export default function ErDiagram({ connId, onClose }: { connId: string; onClose
   useEffect(() => {
     api
       .listDatabases(connId)
-      .then((d) => { setDbs(d); setDb((cur) => cur || d[0] || ""); })
+      .then((d) => { setDbs(d); setDb((cur) => cur || initialDb || d[0] || ""); })
       .catch((e) => setErr(e?.message ?? "讀取資料庫失敗"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connId]);
+
+  // 「逆向至模型」聚焦：模型載入後若含目標表則持久高亮它（及其關聯線），不受滑鼠移動影響。
+  useEffect(() => {
+    if (focusTable && model?.tables.some((t) => t.name === focusTable)) setFocused(focusTable);
+  }, [model, focusTable]);
 
   // 預設網格佈局；若 localStorage 有此 DB 的存檔位置則覆蓋（拖曳後的佈局可保留）。
   const gridLayout = (m: ErModel): Record<string, { x: number; y: number }> => {
@@ -140,40 +158,42 @@ export default function ErDiagram({ connId, onClose }: { connId: string; onClose
   const bump = (delta: number) =>
     setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(z + delta).toFixed(2))));
 
-  // 該關聯是否與目前 hover 的表卡相連（用於高亮）。
+  // 高亮對象：以 hover 優先，否則用「逆向至模型」聚焦的表（持久）。
+  const active = hovered ?? focused;
+  // 該關聯是否與目前高亮的表卡相連（用於高亮）。
   const relatedToHover = (fromT: string, toT: string) =>
-    hovered != null && (hovered === fromT || hovered === toT);
+    active != null && (active === fromT || active === toT);
 
-  const zbtn = "px-2 py-0.5 rounded border border-white/15 hover:bg-white/10 text-white/70 text-xs";
+  const zbtn = "px-2 py-0.5 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 text-xs";
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#11161d] w-[92vw] h-[88vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-panel w-[92vw] h-[88vh] flex flex-col rounded-lg border border-fg/10 shadow-2xl"
         onClick={(e) => e.stopPropagation()}>
-        <div className="px-4 py-2 border-b border-white/10 flex items-center gap-3 text-sm">
+        <div className="px-4 py-2 border-b border-fg/10 flex items-center gap-3 text-sm">
           <span className="font-medium">ER 圖</span>
           <select value={db} onChange={(e) => setDb(e.target.value)} title="選擇資料庫 / schema"
-            className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs outline-none">
+            className="bg-inset border border-fg/10 rounded px-2 py-1 text-xs outline-none">
             {dbs.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
-          {loading && <span className="text-white/40 text-xs">讀取中…</span>}
+          {loading && <span className="text-fg/40 text-xs">讀取中…</span>}
           {model && !loading && (
-            <span className="text-white/40 text-xs">{model.tables.length} 表 · {model.relations.length} 關聯（可拖曳表卡）</span>
+            <span className="text-fg/40 text-xs">{model.tables.length} 表 · {model.relations.length} 關聯（可拖曳表卡）</span>
           )}
           {/* 縮放控制（致敬 Navicat / DBeaver 的 ER 工具） */}
           <div className="ml-auto flex items-center gap-1">
-            <button type="button" className={zbtn} title="縮小" onClick={() => bump(-0.1)}>－</button>
-            <span className="text-white/50 text-xs w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-            <button type="button" className={zbtn} title="放大" onClick={() => bump(0.1)}>＋</button>
+            <button type="button" className={zbtn} title="縮小" aria-label="縮小" onClick={() => bump(-0.1)}><Icon icon={Minus} size={14} /></button>
+            <span className="text-fg/50 text-xs w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
+            <button type="button" className={zbtn} title="放大" aria-label="放大" onClick={() => bump(0.1)}><Icon icon={Plus} size={14} /></button>
             <button type="button" className={zbtn} title="符合視窗" onClick={fit}>適配</button>
             <button type="button" className={zbtn} title="重置佈局與縮放" onClick={resetLayout}>重置</button>
           </div>
-          <button type="button" onClick={onClose} className="text-white/40 hover:text-white">✕</button>
+          <IconButton icon={X} label="關閉" onClick={onClose} className="text-fg/40 hover:text-fg" />
         </div>
         <div ref={viewRef} className="flex-1 overflow-auto relative">
           {err && <div className="p-3 text-red-400 text-sm mono">{err}</div>}
           {model && model.tables.length === 0 && !err && (
-            <div className="p-3 text-white/40 text-sm">此資料庫沒有表。</div>
+            <div className="p-3 text-fg/40 text-sm">此資料庫沒有表。</div>
           )}
           {model && model.tables.length > 0 && (
             <div style={{ width: CANVAS_W * zoom, height: CANVAS_H * zoom }}>
@@ -184,7 +204,7 @@ export default function ErDiagram({ connId, onClose }: { connId: string; onClose
                     const b = center(r.to_table);
                     if (!a || !b) return null;
                     const hot = relatedToHover(r.from_table, r.to_table);
-                    const dim = hovered != null && !hot;
+                    const dim = active != null && !hot;
                     return (
                       <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
                         stroke={hot ? "#60a5fa" : "#3b82f6"} strokeWidth={hot ? 2.5 : 1.5}
@@ -195,23 +215,23 @@ export default function ErDiagram({ connId, onClose }: { connId: string; onClose
                 {model.tables.map((t) => {
                   const p = pos[t.name];
                   if (!p) return null;
-                  const hot = hovered === t.name;
+                  const hot = active === t.name;
                   return (
                     <div key={t.name}
                       onMouseEnter={() => setHovered(t.name)}
                       onMouseLeave={() => setHovered((h) => (h === t.name ? null : h))}
-                      className={`absolute bg-[#1a212b] rounded shadow-lg text-xs border ${hot ? "border-blue-400/80" : "border-white/15"}`}
+                      className={`absolute bg-elevated rounded shadow-lg text-xs border ${hot ? "border-accent/80" : "border-fg/15"}`}
                       style={{ left: p.x, top: p.y, width: CARD_W }}>
-                      <div className="px-2 py-1 bg-[#22304a] rounded-t font-medium cursor-move select-none truncate"
+                      <div className="px-2 py-1 bg-blue-500/25 rounded-t font-medium cursor-move select-none truncate"
                         onPointerDown={(e) => startDrag(t.name, e)} title={t.name}>
                         {t.name}
                       </div>
                       <div>
                         {t.columns.map((c) => (
-                          <div key={c.name} className="flex items-center gap-1 px-2 py-0.5 border-t border-white/5">
-                            <span className="w-3 shrink-0">{c.pk ? "🔑" : c.fk ? "🔗" : ""}</span>
+                          <div key={c.name} className="flex items-center gap-1 px-2 py-0.5 border-t border-fg/5">
+                            <span className="w-3 shrink-0 flex items-center">{c.pk ? <Icon icon={KeyRound} size={12} className="text-amber-400" /> : c.fk ? <Icon icon={Link2} size={12} className="text-blue-300" /> : null}</span>
                             <span className={`truncate flex-1 ${c.fk ? "text-blue-300" : ""}`}>{c.name}</span>
-                            <span className="text-white/30 truncate max-w-[72px] mono">{c.data_type}</span>
+                            <span className="text-fg/30 truncate max-w-[72px] mono">{c.data_type}</span>
                           </div>
                         ))}
                       </div>

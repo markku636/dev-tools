@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { CircleDot } from "lucide-react";
 import { api } from "./api";
+import { uiConfirm } from "./ui";
+import { isDangerousRedisCommand } from "./sql";
+import Icon from "./ui/Icon";
+import { Modal } from "./ui/index";
 
 interface Entry {
   db: string;
@@ -41,6 +46,13 @@ export default function RedisConsole({ connId, connName, initialDb = "0", onClos
       return;
     }
 
+    // FLUSHALL / FLUSHDB 會清空資料且無法復原，先確認；取消則還原輸入方便修改。
+    if (isDangerousRedisCommand(cmd)) {
+      const ok = await uiConfirm("FLUSHALL / FLUSHDB 會清空資料庫且無法復原。確定執行？",
+        { title: "危險指令確認", danger: true, confirmText: "仍要執行" });
+      if (!ok) { setInput(cmd); inputRef.current?.focus(); return; }
+    }
+
     // 已自帶 "n:" DB 前綴（限 1~18 位數字，確保後端 i64 也能解析）則照送並沿用該 DB，
     // 否則套用目前選取的 DB。effDb 用於畫面標註，避免結果歸錯 DB。
     const m = /^(\d{1,18}):/.exec(cmd);
@@ -79,50 +91,53 @@ export default function RedisConsole({ connId, connName, initialDb = "0", onClos
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#0f1419] w-[720px] max-w-[94vw] h-[70vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 flex items-center gap-3">
-          <span className="text-red-400">●</span>
+    <Modal
+      onClose={onClose}
+      size="lg"
+      zClass="z-50"
+      className="h-[70vh]"
+      bodyClassName="p-0 flex flex-col overflow-hidden"
+      title={
+        <div className="flex items-center gap-3 w-full">
+          <Icon icon={CircleDot} size={14} className="text-red-400" />
           <span className="font-medium text-sm">命令列 · {connName}</span>
-          <label className="ml-auto text-xs text-white/50 flex items-center gap-1.5">
+          <label className="ml-auto text-xs text-fg/50 flex items-center gap-1.5">
             DB
             <input value={db} onChange={(e) => setDb(e.target.value.replace(/[^\d]/g, "") || "0")}
               title="目前資料庫；指令可自帶 n: 前綴覆寫"
-              className="w-12 bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-center mono outline-none focus:border-blue-500" />
+              className="w-12 bg-inset border border-fg/10 rounded px-1.5 py-0.5 text-center mono outline-none focus:border-accent" />
           </label>
           <button type="button" onClick={() => setEntries([])} title="清空畫面"
-            className="text-xs px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/70">清空</button>
-          <button type="button" onClick={onClose} className="text-white/40 hover:text-white">✕</button>
+            className="text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70">清空</button>
         </div>
-
-        <div className="flex-1 overflow-auto p-3 mono text-xs leading-relaxed" onClick={() => inputRef.current?.focus()}>
-          {entries.length === 0 && (
-            <div className="text-white/30">輸入 Redis 指令並按 Enter，如 GET key、HGETALL key、KEYS *。輸入 clear 清空。</div>
-          )}
-          {entries.map((en, i) => (
-            <div key={i} className="mb-1.5">
-              <div className="text-emerald-400/90">
-                <span className="text-white/30">{en.db}&gt;</span> {en.cmd}
-              </div>
-              {en.lines.map((ln, j) => (
-                <div key={j} className={`whitespace-pre-wrap break-all ${en.error ? "text-red-400" : "text-white/75"}`}>
-                  {en.lines.length > 1 && !en.error ? <span className="text-white/30">{j + 1}) </span> : null}{ln}
-                </div>
-              ))}
+      }
+    >
+      <div className="flex-1 overflow-auto p-3 mono text-xs leading-relaxed" onClick={() => inputRef.current?.focus()}>
+        {entries.length === 0 && (
+          <div className="text-fg/30">輸入 Redis 指令並按 Enter，如 GET key、HGETALL key、KEYS *。輸入 clear 清空。</div>
+        )}
+        {entries.map((en, i) => (
+          <div key={i} className="mb-1.5">
+            <div className="text-emerald-400/90">
+              <span className="text-fg/30">{en.db}&gt;</span> {en.cmd}
             </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-
-        <div className="border-t border-white/10 px-3 py-2 flex items-center gap-2 mono text-sm">
-          <span className="text-white/30 shrink-0">{db}&gt;</span>
-          <input ref={inputRef} autoFocus value={input} disabled={busy}
-            onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
-            placeholder={busy ? "執行中…" : "輸入指令…"}
-            className="flex-1 bg-transparent outline-none text-white/90 placeholder:text-white/25" />
-        </div>
+            {en.lines.map((ln, j) => (
+              <div key={j} className={`whitespace-pre-wrap break-all ${en.error ? "text-red-400" : "text-fg/75"}`}>
+                {en.lines.length > 1 && !en.error ? <span className="text-fg/30">{j + 1}) </span> : null}{ln}
+              </div>
+            ))}
+          </div>
+        ))}
+        <div ref={bottomRef} />
       </div>
-    </div>
+
+      <div className="border-t border-fg/10 px-3 py-2 flex items-center gap-2 mono text-sm">
+        <span className="text-fg/30 shrink-0">{db}&gt;</span>
+        <input ref={inputRef} autoFocus value={input} disabled={busy}
+          onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown}
+          placeholder={busy ? "執行中…" : "輸入指令…"}
+          className="flex-1 bg-transparent outline-none text-fg/90 placeholder:text-fg/40/25" />
+      </div>
+    </Modal>
   );
 }

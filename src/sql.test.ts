@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   splitSqlStatements,
+  splitSqlStatementsWithRanges,
+  statementAtOffset,
+  parseClipboardGrid,
   resultToCsv,
   resultToTsv,
   resultToJson,
@@ -21,6 +24,9 @@ import {
   buildRenameTable,
   buildDuplicateTable,
   buildInsertAllRows,
+  buildDeleteAllRows,
+  buildInsertValues,
+  buildGrantTemplate,
   buildCreateView,
   viewDefinitionSql,
   buildReplaceView,
@@ -57,6 +63,10 @@ import {
   grantScope,
   buildGrant,
   buildRevoke,
+  buildDropRoutine,
+  userListSql,
+  isDangerousRedisCommand,
+  lintSqlStructure,
   type NewColumn,
 } from "./sql";
 
@@ -104,6 +114,123 @@ describe("splitSqlStatements", () => {
   });
   it("does not mistake $1 placeholders for dollar-quotes", () => {
     expect(splitSqlStatements("SELECT $1; SELECT $2")).toEqual(["SELECT $1", "SELECT $2"]);
+  });
+});
+
+describe("splitSqlStatementsWithRanges / statementAtOffset", () => {
+  it("returns trimmed text with correct offsets", () => {
+    const sql = "SELECT 1;\nSELECT 2;";
+    const spans = splitSqlStatementsWithRanges(sql);
+    expect(spans.map((s) => s.text)).toEqual(["SELECT 1", "SELECT 2"]);
+    expect(spans[0]).toMatchObject({ from: 0, to: 8 });
+    // 第二條從換行後的 'S' 起算。
+    expect(sql.slice(spans[1].from, spans[1].to)).toBe("SELECT 2");
+  });
+  it("does not split on semicolons inside strings/comments/dollar-quotes", () => {
+    expect(splitSqlStatementsWithRanges("SELECT ';'; SELECT 2").map((s) => s.text)).toEqual([
+      "SELECT ';'",
+      "SELECT 2",
+    ]);
+    expect(
+      splitSqlStatementsWithRanges("DO $t$ BEGIN; END $t$; SELECT 2").map((s) => s.text)
+    ).toEqual(["DO $t$ BEGIN; END $t$", "SELECT 2"]);
+  });
+  it("finds the statement under the cursor offset", () => {
+    const sql = "SELECT 1;\nSELECT 2;\nSELECT 3";
+    expect(statementAtOffset(sql, 3)).toBe("SELECT 1"); // 第一條中間
+    expect(statementAtOffset(sql, 13)).toBe("SELECT 2"); // 第二條中間
+    expect(statementAtOffset(sql, sql.length)).toBe("SELECT 3"); // 結尾
+  });
+  it("attributes cursor in inter-statement whitespace to the following statement", () => {
+    const sql = "SELECT 1;\n\nSELECT 2";
+    // 位移 10 在兩條語句之間的空白，應歸後一條。
+    expect(statementAtOffset(sql, 10)).toBe("SELECT 2");
+  });
+  it("returns null for empty / whitespace-only input", () => {
+    expect(statementAtOffset("   \n  ", 2)).toBeNull();
+  });
+});
+
+describe("buildDropRoutine", () => {
+  const base = { name: "do_thing", routine_type: "procedure", parent: null, signature: null };
+  it("MySQL: procedure / function / event / trigger keywords (qualified, IF EXISTS)", () => {
+    expect(buildDropRoutine("mysql", "app", { ...base, routine_type: "procedure" })).toBe("DROP PROCEDURE IF EXISTS `app`.`do_thing`");
+    expect(buildDropRoutine("mysql", "app", { ...base, routine_type: "function" })).toBe("DROP FUNCTION IF EXISTS `app`.`do_thing`");
+    expect(buildDropRoutine("mysql", "app", { ...base, routine_type: "event" })).toBe("DROP EVENT IF EXISTS `app`.`do_thing`");
+    expect(buildDropRoutine("mysql", "app", { ...base, routine_type: "trigger" })).toBe("DROP TRIGGER IF EXISTS `app`.`do_thing`");
+  });
+  it("PostgreSQL: function/procedure carry the arg signature; trigger drops ON its parent table", () => {
+    expect(buildDropRoutine("postgres", "public", { ...base, routine_type: "function", signature: "integer, text" }))
+      .toBe('DROP FUNCTION IF EXISTS "public"."do_thing"(integer, text)');
+    expect(buildDropRoutine("postgres", "public", { ...base, routine_type: "procedure", signature: "" }))
+      .toBe('DROP PROCEDURE IF EXISTS "public"."do_thing"()');
+    expect(buildDropRoutine("postgres", "public", { name: "trg", routine_type: "trigger", parent: "users", signature: null }))
+      .toBe('DROP TRIGGER IF EXISTS "trg" ON "public"."users"');
+  });
+  it("SQLite: only triggers exist; no schema qualifier", () => {
+    expect(buildDropRoutine("sqlite", "main", { name: "trg", routine_type: "trigger", parent: null, signature: null }))
+      .toBe("DROP TRIGGER IF EXISTS `trg`");
+  });
+});
+
+describe("userListSql", () => {
+  it("selects the expected MySQL user columns and ordering", () => {
+    const s = userListSql();
+    expect(s).toContain("FROM mysql.user");
+    expect(s).toContain("account_locked");
+    expect(s).toContain("max_user_connections");
+    expect(s).toContain("ORDER BY User, Host");
+  });
+});
+
+describe("parseClipboardGrid", () => {
+  it("parses a TSV block into a 2D array", () => {
+    expect(parseClipboardGrid("a\tb\tc\n1\t2\t3")).toEqual([
+      ["a", "b", "c"],
+      ["1", "2", "3"],
+    ]);
+  });
+  it("treats plain text as 1x1", () => {
+    expect(parseClipboardGrid("hello")).toEqual([["hello"]]);
+  });
+  it("strips a single trailing newline (CRLF or LF) without dropping interior blanks", () => {
+    expect(parseClipboardGrid("a\tb\r\n1\t2\r\n")).toEqual([
+      ["a", "b"],
+      ["1", "2"],
+    ]);
+    // 內部空白格保留。
+    expect(parseClipboardGrid("a\t\tc")).toEqual([["a", "", "c"]]);
+  });
+});
+
+describe("lintSqlStructure", () => {
+  it("passes clean procedural SQL (no false positives on BEGIN…END)", () => {
+    const sp = "CREATE PROCEDURE p(IN a INT)\nBEGIN\n  IF a > 0 THEN SELECT a; END IF;\nEND";
+    expect(lintSqlStructure(sp)).toEqual([]);
+  });
+  it("flags an unmatched opening paren", () => {
+    const marks = lintSqlStructure("SELECT foo(a, b");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].message).toContain("未配對的左括號");
+  });
+  it("flags a surplus closing paren", () => {
+    const marks = lintSqlStructure("SELECT a)");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].message).toContain("多餘的右括號");
+  });
+  it("flags an unterminated string", () => {
+    const marks = lintSqlStructure("SELECT 'abc");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].message).toContain("未結束的字串");
+  });
+  it("ignores parens / quotes inside strings, comments and dollar-quotes", () => {
+    expect(lintSqlStructure("SELECT ')(' , `c)x`")).toEqual([]);
+    expect(lintSqlStructure("SELECT 1 /* ( ( */ -- )\nFROM t")).toEqual([]);
+    expect(lintSqlStructure("AS $$ BEGIN x := ')'; END $$")).toEqual([]);
+  });
+  it("flags an unterminated block comment and dollar-quote", () => {
+    expect(lintSqlStructure("SELECT 1 /* open").map((m) => m.message)).toContain("未結束的區塊註解 /* */");
+    expect(lintSqlStructure("AS $$ BEGIN")[0].message).toContain("未結束的 $$ 區塊");
   });
 });
 
@@ -294,6 +421,38 @@ describe("table/database lifecycle DDL", () => {
   it("buildInsertAllRows: INSERT INTO dst SELECT * FROM src", () => {
     expect(buildInsertAllRows("mysql", "db", "t", "t_copy")).toBe("INSERT INTO `db`.`t_copy` SELECT * FROM `db`.`t`;");
     expect(buildInsertAllRows("postgres", "public", "t", "t_copy")).toBe('INSERT INTO "public"."t_copy" SELECT * FROM "public"."t";');
+  });
+
+  it("buildDeleteAllRows: DELETE FROM qualified per kind", () => {
+    expect(buildDeleteAllRows("mysql", "db", "t")).toBe("DELETE FROM `db`.`t`;");
+    expect(buildDeleteAllRows("postgres", "public", "t")).toBe('DELETE FROM "public"."t";');
+    expect(buildDeleteAllRows("sqlite", "main", "t")).toBe("DELETE FROM `t`;");
+  });
+
+  it("buildInsertValues: dialect-aware identifier + literal quoting, NULL passthrough", () => {
+    const cols = ["id", "name"];
+    const rows = [["1", "O'Brien"], ["2", null]];
+    expect(buildInsertValues("mysql", "db", "t", cols, rows)).toBe(
+      "INSERT INTO `db`.`t` (`id`, `name`) VALUES ('1', 'O''Brien');\n" +
+      "INSERT INTO `db`.`t` (`id`, `name`) VALUES ('2', NULL);",
+    );
+    // PostgreSQL：雙引號識別字、反斜線不加倍（standard_conforming_strings）。
+    expect(buildInsertValues("postgres", "public", "t", ["c"], [["a\\b"]])).toBe(
+      `INSERT INTO "public"."t" ("c") VALUES ('a\\b');`,
+    );
+    // MySQL：反斜線需加倍。
+    expect(buildInsertValues("mysql", "db", "t", ["c"], [["a\\b"]])).toBe(
+      "INSERT INTO `db`.`t` (`c`) VALUES ('a\\\\b');",
+    );
+  });
+
+  it("buildGrantTemplate: MySQL / PostgreSQL templates, SQLite n/a", () => {
+    const my = buildGrantTemplate("mysql", "db", "t");
+    expect(my).toContain("GRANT SELECT, INSERT, UPDATE, DELETE ON `db`.`t` TO 'user'@'%';");
+    expect(my).toContain("FLUSH PRIVILEGES;");
+    const pg = buildGrantTemplate("postgres", "public", "t");
+    expect(pg).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."t" TO <role>;');
+    expect(pg).not.toContain("FLUSH PRIVILEGES");
   });
 
   it("buildCreateView qualifies the name and trims the SELECT", () => {
@@ -502,6 +661,32 @@ describe("isDangerousStatement", () => {
   it("does not count WHERE that appears only inside a string or comment", () => {
     expect(isDangerousStatement("UPDATE t SET name = 'where' ")).toBe(true);
     expect(isDangerousStatement("DELETE FROM t -- where id=1")).toBe(true);
+  });
+  it("flags UPDATE/DELETE whose only WHERE is inside a subquery (still affects all rows)", () => {
+    // 子查詢內的 WHERE 不算頂層條件——這些語句其實會影響整張表。
+    expect(isDangerousStatement("UPDATE t SET a = (SELECT MAX(b) FROM u WHERE u.x = 1)")).toBe(true);
+    expect(isDangerousStatement("DELETE FROM t USING (SELECT id FROM u WHERE x=1) s")).toBe(true);
+  });
+  it("still allows a real top-level WHERE even with a subquery present", () => {
+    expect(isDangerousStatement("DELETE FROM t WHERE id IN (SELECT id FROM u WHERE x = 1)")).toBe(false);
+    expect(isDangerousStatement("UPDATE t SET a = (SELECT 1) WHERE id = 2")).toBe(false);
+    expect(isDangerousStatement("UPDATE t SET a = 1 WHERE id IN (1, 2, 3)")).toBe(false);
+  });
+});
+
+describe("isDangerousRedisCommand", () => {
+  it("flags FLUSHALL / FLUSHDB (case-insensitive, optional DB prefix)", () => {
+    expect(isDangerousRedisCommand("FLUSHALL")).toBe(true);
+    expect(isDangerousRedisCommand("flushdb")).toBe(true);
+    expect(isDangerousRedisCommand("FLUSHALL ASYNC")).toBe(true);
+    expect(isDangerousRedisCommand("1: FLUSHDB")).toBe(true);
+  });
+  it("does not flag safe / targeted commands", () => {
+    expect(isDangerousRedisCommand("GET key")).toBe(false);
+    expect(isDangerousRedisCommand("DEL user:1")).toBe(false);
+    expect(isDangerousRedisCommand("SCAN 0")).toBe(false);
+    // 不誤傷以 flush 開頭的鍵名（非指令）
+    expect(isDangerousRedisCommand("GET flushall_count")).toBe(false);
   });
 });
 

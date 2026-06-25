@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { api, ImportResult } from "./api";
 import { pickOpenFile, toast } from "./ui";
+import { Modal, Button, Segmented } from "./ui/index";
+import { Download } from "lucide-react";
 
 // CSV 匯入對話框（致敬 Navicat / DBeaver 匯入精靈）。逐列以 insert_row 寫入目標表。
 export default function ImportDialog({ connId, database, table, onDone, onClose }: {
@@ -52,25 +54,31 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[460px] rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 font-medium text-sm">
-          匯入 CSV · <span className="mono text-white/60">{table}</span>
-        </div>
-        <div className="p-5 space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-white/50">分隔字元</span>
-            <div className="flex gap-2">
-              {[[",", "逗號 ,"], ["\t", "Tab"], [";", "分號 ;"]].map(([v, label]) => (
-                <button key={label} type="button" onClick={() => setDelimiter(v)}
-                  className={`px-2.5 py-1 rounded text-sm border ${
-                    delimiter === v ? "border-blue-500 bg-blue-500/15 text-blue-300" : "border-white/10 text-white/50"
-                  }`}>
-                  {label}
-                </button>
-              ))}
-            </div>
+    <Modal
+      onClose={onClose}
+      title={<>匯入 CSV · <span className="mono text-fg/60">{table}</span></>}
+      icon={Download}
+      size="sm"
+      zClass="z-50"
+      className="!w-[460px]"
+      bodyClassName="p-5 space-y-3 overflow-auto"
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>{result ? "關閉" : "取消"}</Button>
+        <Button variant="primary" loading={busy} onClick={run} disabled={busy}>選擇檔案並匯入</Button>
+      </>}
+    >
+      <div className="flex items-center gap-3">
+            <span className="text-xs text-fg/50">分隔字元</span>
+            <Segmented
+              ariaLabel="分隔字元"
+              value={delimiter}
+              onChange={setDelimiter}
+              options={[
+                { value: ",", label: "逗號 ," },
+                { value: "\t", label: "Tab" },
+                { value: ";", label: "分號 ;" },
+              ]}
+            />
           </div>
 
           <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
@@ -79,7 +87,7 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
           </label>
           {!hasHeader && (
             <label className="block">
-              <span className="text-xs text-white/50 mb-1 block">欄名（逗號分隔，依 CSV 欄序對應）</span>
+              <span className="text-xs text-fg/50 mb-1 block">欄名（逗號分隔，依 CSV 欄序對應）</span>
               <input className={inputCls} value={columns} onChange={(e) => setColumns(e.target.value)}
                 placeholder="id, name, qty" />
             </label>
@@ -94,7 +102,7 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
           </label>
 
           {result && (
-            <div className="mt-1 text-sm rounded border border-white/10 bg-black/20 p-3 space-y-1">
+            <div className="mt-1 text-sm rounded border border-fg/10 bg-inset p-3 space-y-1">
               <div>
                 匯入 <span className="text-emerald-400">{result.imported}</span> 列
                 {result.failed > 0 && <> · 失敗 <span className="text-red-400">{result.failed}</span> 列</>}
@@ -106,20 +114,8 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
               )}
             </div>
           )}
-        </div>
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">
-            {result ? "關閉" : "取消"}
-          </button>
-          <button type="button" onClick={run} disabled={busy}
-            className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
-            {busy ? "匯入中…" : "選擇檔案並匯入"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
-const inputCls = "w-full bg-black/30 border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-500";
+const inputCls = "w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm outline-none focus:border-accent";

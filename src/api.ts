@@ -275,6 +275,39 @@ export function onRedisPubSubError(cb: (msg: string) => void): Promise<UnlistenF
   return listen<string>("redis-pubsub-error", (e) => cb(e.payload));
 }
 
+// ---- AI 助手（本機 claude CLI）----
+
+// claude CLI 偵測結果（決定是否顯示安裝 / 登入提示）。
+export interface ClaudeStatus {
+  installed: boolean;
+  version: string | null;
+  logged_in: boolean;
+  path: string | null;
+}
+
+// 助手模式：advise = 純問答 / 產生腳本文字（唯讀）；agent = 可寫腳本檔到工作資料夾。
+export type AgentMode = "advise" | "agent";
+
+// 後端 `claude-stream` 事件 payload（依 kind 取用欄位）。
+export interface AgentEvent {
+  req_id: string;
+  kind: "system" | "text" | "tool" | "result" | "error" | "done";
+  text?: string | null;
+  session_id?: string | null;
+  model?: string | null;
+  tool?: string | null;
+  is_error?: boolean | null;
+  duration_ms?: number | null;
+  code?: number | null;
+}
+
+// 訂閱某次問答的串流事件（僅回呼符合 reqId 者）。回傳取消監聽函式。
+export function onClaudeStream(reqId: string, cb: (e: AgentEvent) => void): Promise<UnlistenFn> {
+  return listen<AgentEvent>("claude-stream", (e) => {
+    if (e.payload.req_id === reqId) cb(e.payload);
+  });
+}
+
 export interface BackupResult {
   path: string;
   bytes: number;
@@ -320,6 +353,41 @@ export interface BackupHistoryEntry {
 export interface AppError {
   kind: string;
   message: string;
+}
+
+// DDL 語法驗證結果（與後端 ValidationReport 對齊）。
+// ok：未發現語法錯誤（或略過時為 true）；validated：伺服器是否實際驗證；
+// 略過時（MySQL 觸發器 / 無權限）validated=false，caveat 說明原因。
+export interface ValidationReport {
+  ok: boolean;
+  validated: boolean;
+  message: string | null;
+  line: number | null;
+  caveat: string | null;
+}
+
+// SQL Search（全資料庫物件搜尋）單筆命中。與後端 SearchHit 對齊。
+export interface SearchHit {
+  database: string;
+  // table|view|column|index|procedure|function|trigger|foreign_key|collection|key
+  object_type: string;
+  object_name: string;
+  parent?: string | null; // 所屬資料表 / 集合（column / index / trigger / fk）
+  matched_in: string;     // name|definition|comment
+  snippet?: string | null; // 定義 / 註解命中的前後文片段（供高亮）
+  extra?: string | null;   // 資料型別 / 引數簽章 等補充
+}
+
+// SQL Search 選項。與後端 SearchOptions（serde）對齊。
+export interface SearchOptions {
+  term: string;
+  databases?: string[] | null; // null / 省略 → 全部（排除系統庫）
+  types?: string[] | null;     // null / 省略 → 全部型別
+  match_names?: boolean;
+  match_definitions?: boolean;
+  match_comments?: boolean;
+  case_sensitive?: boolean;
+  limit?: number | null;
 }
 
 // 連線類型的顯示資料（色標呼應規劃文件）
@@ -380,7 +448,12 @@ export const api = {
     invoke<RoutineInfo[]>("list_routines", { id, database }),
   routineDefinition: (id: string, database: string, name: string, routineType: string) =>
     invoke<string>("routine_definition", { id, database, name, routineType }),
+  searchObjects: (id: string, options: SearchOptions) =>
+    invoke<SearchHit[]>("search_objects", { id, options }),
   execDdl: (id: string, sql: string) => invoke<void>("exec_ddl", { id, sql }),
+  // DDL 語法驗證（不持久化）：PG/SQLite 交易回滾、MySQL 暫存名稱試建。database 供 MySQL 試建用 schema。
+  validateDdl: (id: string, database: string, sql: string) =>
+    invoke<ValidationReport>("validate_ddl", { id, database, sql }),
   keyDetail: (id: string, database: string, key: string) =>
     invoke<KeyDetail | null>("key_detail", { id, database, key }),
   keyEdit: (id: string, database: string, key: string, edit: KeyEdit) =>
@@ -444,4 +517,24 @@ export const api = {
   restoreFromHistory: (entryId: string) =>
     invoke<void>("restore_from_history", { entryId }),
   clearHistory: () => invoke<void>("clear_history"),
+
+  // AI 助手：偵測 claude CLI / 送出問答（串流走 onClaudeStream）/ 取消。
+  claudeDetect: () => invoke<ClaudeStatus>("claude_detect"),
+  claudeSend: (args: {
+    reqId: string;
+    prompt: string;
+    sessionId?: string | null;
+    model?: string | null;
+    mode?: AgentMode | null;
+  }) =>
+    invoke<void>("claude_send", {
+      reqId: args.reqId,
+      prompt: args.prompt,
+      sessionId: args.sessionId ?? null,
+      model: args.model ?? null,
+      mode: args.mode ?? null,
+    }),
+  claudeCancel: (reqId: string) => invoke<void>("claude_cancel", { reqId }),
+  openAgentWorkspace: () => invoke<void>("open_agent_workspace"),
+  openExternal: (url: string) => invoke<void>("open_external", { url }),
 };

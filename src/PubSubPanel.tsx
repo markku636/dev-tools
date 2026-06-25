@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { CircleDot, X, Play, Pause } from "lucide-react";
 import { api, onRedisPubSub, onRedisPubSubError, PubSubMessage } from "./api";
-import { toast } from "./ui";
+import { toast, useModalOverlay } from "./ui";
+import { IconButton } from "./ui/index";
+import Icon from "./ui/Icon";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 interface Line {
@@ -17,6 +20,7 @@ const MAX_LINES = 2000;
 export default function PubSubPanel({ connId, connName, onClose }: {
   connId: string; connName: string; onClose: () => void;
 }) {
+  useModalOverlay(onClose); // Esc 關閉 + 計入 modalCount
   const [channelsInput, setChannelsInput] = useState("");
   const [patternsInput, setPatternsInput] = useState("*");
   const [subscribed, setSubscribed] = useState(false);
@@ -109,70 +113,70 @@ export default function PubSubPanel({ connId, connName, onClose }: {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#0f1419] w-[760px] max-w-[94vw] h-[78vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-app w-[760px] max-w-[94vw] h-[78vh] flex flex-col rounded-lg border border-fg/10 shadow-2xl"
         onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 flex items-center gap-3">
-          <span className={subscribed ? "text-emerald-400" : "text-white/30"}>●</span>
+        <div className="px-5 py-3 border-b border-fg/10 flex items-center gap-3">
+          <Icon icon={CircleDot} size={14} className={subscribed ? "text-emerald-400" : "text-fg/30"} />
           <span className="font-medium text-sm">Pub/Sub · {connName}</span>
-          <span className="text-xs text-white/35">{subscribed ? "訂閱中" : "未訂閱"} · {lines.length} 則</span>
-          <button type="button" onClick={onClose} className="ml-auto text-white/40 hover:text-white">✕</button>
+          <span className="text-xs text-fg/35">{subscribed ? "訂閱中" : "未訂閱"} · {lines.length} 則</span>
+          <IconButton icon={X} label="關閉" iconSize={16} onClick={onClose} className="ml-auto text-fg/40 hover:text-fg" />
         </div>
 
         {/* 訂閱列 */}
-        <div className="px-4 py-2 border-b border-white/10 flex flex-wrap items-center gap-2 text-xs">
-          <label className="text-white/40">頻道</label>
+        <div className="px-4 py-2 border-b border-fg/10 flex flex-wrap items-center gap-2 text-xs">
+          <label className="text-fg/40">頻道</label>
           <input value={channelsInput} onChange={(e) => setChannelsInput(e.target.value)}
             disabled={subscribed} placeholder="news, chat（空白 / 逗號分隔）"
-            className="flex-1 min-w-[140px] bg-black/30 border border-white/10 rounded px-2 py-1 mono outline-none focus:border-blue-500 disabled:opacity-50" />
-          <label className="text-white/40">樣式</label>
+            className="flex-1 min-w-[140px] bg-inset border border-fg/10 rounded px-2 py-1 mono outline-none focus:border-accent disabled:opacity-50" />
+          <label className="text-fg/40">樣式</label>
           <input value={patternsInput} onChange={(e) => setPatternsInput(e.target.value)}
             disabled={subscribed} placeholder="user:*"
-            className="w-32 bg-black/30 border border-white/10 rounded px-2 py-1 mono outline-none focus:border-blue-500 disabled:opacity-50" />
+            className="w-32 bg-inset border border-fg/10 rounded px-2 py-1 mono outline-none focus:border-accent disabled:opacity-50" />
           {subscribed ? (
             <button type="button" onClick={unsubscribe} disabled={busy}
-              className="px-3 py-1 rounded bg-amber-600/80 hover:bg-amber-600 text-white disabled:opacity-40">取消訂閱</button>
+              className="px-3 py-1 rounded bg-amber-600/80 hover:bg-amber-600 text-fg disabled:opacity-40">取消訂閱</button>
           ) : (
             <button type="button" onClick={subscribe} disabled={busy}
-              className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40">訂閱</button>
+              className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-fg disabled:opacity-40">訂閱</button>
           )}
           <button type="button" onClick={() => setPaused((p) => !p)} title="暫停 / 繼續接收"
-            className={`px-2 py-1 rounded border border-white/15 hover:bg-white/10 ${paused ? "text-amber-300" : "text-white/60"}`}>
-            {paused ? "▶ 繼續" : "⏸ 暫停"}
+            className={`px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 inline-flex items-center gap-1 ${paused ? "text-amber-300" : "text-fg/60"}`}>
+            {paused ? <><Icon icon={Play} size={14} /> 繼續</> : <><Icon icon={Pause} size={14} /> 暫停</>}
           </button>
           <button type="button" onClick={() => setLines([])} title="清空訊息"
-            className="px-2 py-1 rounded border border-white/15 hover:bg-white/10 text-white/60">清空</button>
+            className="px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/60">清空</button>
         </div>
 
-        {err && <div className="px-4 py-1.5 text-red-400 text-xs mono break-all border-b border-white/10">{err}</div>}
+        {err && <div className="px-4 py-1.5 text-red-400 text-xs mono break-all border-b border-fg/10">{err}</div>}
 
         {/* 訊息流 */}
         <div className="flex-1 overflow-auto p-3 mono text-xs leading-relaxed">
           {lines.length === 0 && (
-            <div className="text-white/30">訂閱後，符合的訊息會即時顯示在這裡。</div>
+            <div className="text-fg/30">訂閱後，符合的訊息會即時顯示在這裡。</div>
           )}
           {lines.map((l, i) => (
             <div key={i} className="mb-1 flex gap-2">
-              <span className="text-white/25 shrink-0">{l.at}</span>
+              <span className="text-fg/25 shrink-0">{l.at}</span>
               <span className="text-emerald-400/90 shrink-0 max-w-[180px] truncate" title={l.channel}>
-                {l.channel}{l.pattern ? <span className="text-white/30"> ({l.pattern})</span> : null}
+                {l.channel}{l.pattern ? <span className="text-fg/30"> ({l.pattern})</span> : null}
               </span>
-              <span className="text-white/80 whitespace-pre-wrap break-all">{l.payload}</span>
+              <span className="text-fg/80 whitespace-pre-wrap break-all">{l.payload}</span>
             </div>
           ))}
           <div ref={bottomRef} />
         </div>
 
         {/* 發佈列 */}
-        <div className="border-t border-white/10 px-4 py-2 flex items-center gap-2 text-xs">
-          <span className="text-white/40 shrink-0">發佈</span>
+        <div className="border-t border-fg/10 px-4 py-2 flex items-center gap-2 text-xs">
+          <span className="text-fg/40 shrink-0">發佈</span>
           <input value={pubChannel} onChange={(e) => setPubChannel(e.target.value)} placeholder="頻道"
-            className="w-32 bg-black/30 border border-white/10 rounded px-2 py-1 mono outline-none focus:border-blue-500" />
+            className="w-32 bg-inset border border-fg/10 rounded px-2 py-1 mono outline-none focus:border-accent" />
           <input value={pubMessage} onChange={(e) => setPubMessage(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") publish(); }} placeholder="訊息內容…"
-            className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1 mono outline-none focus:border-blue-500" />
+            className="flex-1 bg-inset border border-fg/10 rounded px-2 py-1 mono outline-none focus:border-accent" />
           <button type="button" onClick={publish}
-            className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white">送出</button>
+            className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-fg">送出</button>
         </div>
       </div>
     </div>

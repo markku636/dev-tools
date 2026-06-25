@@ -9,7 +9,8 @@ use crate::backup::{self, BackupResult};
 use crate::db::{
     AlterOp, BigKey, CellEdit, ClientInfo, ColumnInfo, ConnectionConfig, DataQuery, ErModel,
     ForeignKeyInfo, KeyDetail, KeyEdit, KeyPage, PagedData, PoolStatus, QueryResult, RedisKeys,
-    RoutineInfo, RowDelete, RowInsert, ServerInfoSection, SlowLogEntry, TableInfo,
+    RoutineInfo, RowDelete, RowInsert, SearchHit, SearchOptions, ServerInfoSection, SlowLogEntry, TableInfo,
+    ValidationReport,
 };
 use crate::error::{AppError, AppResult};
 use crate::manager::ConnectionManager;
@@ -24,6 +25,8 @@ pub struct AppState {
     pub history_lock: Arc<tokio::sync::Mutex<()>>,
     /// Redis Pub/Sub 訂閱的背景任務（key = 連線 id）。重新訂閱 / 取消訂閱 / 斷線時 abort。
     pub pubsub: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
+    /// AI 助手進行中的問答背景任務（key = req_id）。取消時 abort 即終止 claude 子程序。
+    pub agent_jobs: Arc<Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
 }
 
 /// 若前端送來的 secret 為空（存檔但未重新輸入的連線），從 keychain 補回。
@@ -361,10 +364,31 @@ pub async fn routine_definition(
     state.manager.routine_definition(&id, &database, &name, &routine_type).await
 }
 
+/// 全資料庫物件搜尋（SQL Search）：跨資料庫 / schema 比對名稱 / 定義內文 / 註解。
+#[tauri::command]
+pub async fn search_objects(
+    state: State<'_, AppState>,
+    id: String,
+    options: SearchOptions,
+) -> AppResult<Vec<SearchHit>> {
+    state.manager.search_objects(&id, &options).await
+}
+
 /// 執行 DDL（CREATE / DROP PROCEDURE / FUNCTION / TRIGGER 等，以簡單查詢協定整段送出）。
 #[tauri::command]
 pub async fn exec_ddl(state: State<'_, AppState>, id: String, sql: String) -> AppResult<()> {
     state.manager.exec_ddl(&id, &sql).await
+}
+
+/// 驗證 DDL 語法而不持久化（PG/SQLite 交易回滾、MySQL 暫存名稱試建）。回傳 ValidationReport。
+#[tauri::command]
+pub async fn validate_ddl(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    sql: String,
+) -> AppResult<ValidationReport> {
+    state.manager.validate_ddl(&id, &database, &sql).await
 }
 
 #[tauri::command]

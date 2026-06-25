@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { Table2 } from "lucide-react";
 import { api, ColumnInfo, DbKind, IndexInfo } from "./api";
-import { useEscToClose, toast, uiConfirm } from "./ui";
+import { toast, uiConfirm } from "./ui";
+import { Modal, Button } from "./ui/index";
 import { tableOptionsSql, buildAlterTableOptions, buildConvertCharset } from "./sql";
 
 const TABLE_ENGINES = ["InnoDB", "MyISAM", "MEMORY", "ARCHIVE", "CSV"];
@@ -15,7 +17,6 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
   objKind: string; // "table" | "view"（Mongo 為集合）
   onClose: () => void;
 }) {
-  useEscToClose(onClose);
   const [cols, setCols] = useState<ColumnInfo[] | null>(null);
   const [idx, setIdx] = useState<IndexInfo[] | null>(null);
   // 列數採點擊才計算（大表 COUNT(*) 可能較慢且佔用連線，不在開啟時自動跑）。
@@ -108,24 +109,28 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[95]" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[560px] max-w-[94vw] max-h-[88vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
+    <Modal
+      onClose={onClose}
+      icon={Table2}
+      size="md"
+      zClass="z-[95]"
+      bodyClassName="p-5 space-y-4 overflow-auto text-sm"
+      title={
+        <span className="flex items-center gap-2 min-w-0">
           <span className="font-medium text-sm truncate">{table}</span>
-          <span className="text-xs px-1.5 py-0.5 rounded bg-white/10 text-white/50">{objLabel}</span>
-          <span className="text-xs text-white/40 mono">{db}</span>
-          <button type="button" onClick={onClose} className="ml-auto text-white/40 hover:text-white">✕</button>
-        </div>
-
-        <div className="p-5 space-y-4 overflow-auto text-sm">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded border border-white/10 px-3 py-2">
-              <div className="text-xs text-white/40">列數</div>
+          <span className="text-xs px-1.5 py-0.5 rounded bg-fg/10 text-fg/50">{objLabel}</span>
+          <span className="text-xs text-fg/40 mono">{db}</span>
+        </span>
+      }
+      footer={<Button variant="secondary" onClick={onClose}>關閉</Button>}
+    >
+      <div className="grid grid-cols-3 gap-2">
+            <div className="rounded border border-fg/10 px-3 py-2">
+              <div className="text-xs text-fg/40">列數</div>
               {rows === "idle" ? (
                 <button type="button" onClick={countRows} className="text-sm text-blue-400 hover:text-blue-300 mt-0.5">點此計算</button>
               ) : (
-                <div className="text-base mono text-white/90 mt-0.5">
+                <div className="text-base mono text-fg/90 mt-0.5">
                   {rows === "loading" ? "計算中…" : rows === "error" ? "—" : rows.toLocaleString()}
                 </div>
               )}
@@ -138,8 +143,8 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
             <Section title="統計">
               {stats.map(([k, v]) => (
                 <div key={k} className="flex px-3 py-1.5 gap-3">
-                  <span className="text-white/45 w-28 shrink-0">{k}</span>
-                  <span className="text-white/85 mono break-all">{v}</span>
+                  <span className="text-fg/45 w-28 shrink-0">{k}</span>
+                  <span className="text-fg/85 mono break-all">{v}</span>
                 </div>
               ))}
             </Section>
@@ -149,22 +154,22 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
             <Section title="選項（可編輯）">
               <div className="px-3 py-2.5 space-y-2.5">
                 <div className="flex items-center gap-3">
-                  <span className="text-white/45 w-20 shrink-0 text-xs">引擎</span>
+                  <span className="text-fg/45 w-20 shrink-0 text-xs">引擎</span>
                   <select value={engine} onChange={(e) => setEngine(e.target.value)} title="儲存引擎"
-                    className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 text-xs min-w-[140px]">
+                    className="bg-well border border-fg/15 rounded px-2 py-1 text-xs min-w-[140px]">
                     {engine && !TABLE_ENGINES.includes(engine) && <option value={engine}>{engine}</option>}
                     {TABLE_ENGINES.map((en) => <option key={en} value={en}>{en}</option>)}
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-white/45 w-20 shrink-0 text-xs">AUTO_INCREMENT</span>
+                  <span className="text-fg/45 w-20 shrink-0 text-xs">AUTO_INCREMENT</span>
                   <input value={autoInc} onChange={(e) => setAutoInc(e.target.value.replace(/[^0-9]/g, ""))}
-                    className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 text-xs w-32 mono" placeholder="—" />
+                    className="bg-well border border-fg/15 rounded px-2 py-1 text-xs w-32 mono" placeholder="—" />
                 </div>
                 <div className="flex items-start gap-3">
-                  <span className="text-white/45 w-20 shrink-0 text-xs mt-1">註解</span>
+                  <span className="text-fg/45 w-20 shrink-0 text-xs mt-1">註解</span>
                   <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
-                    className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 text-xs flex-1 resize-none" placeholder="（無）" />
+                    className="bg-well border border-fg/15 rounded px-2 py-1 text-xs flex-1 resize-none" placeholder="（無）" />
                 </div>
                 <div className="flex justify-end">
                   <button type="button" onClick={applyOptions} disabled={savingOpts || !orig}
@@ -172,18 +177,18 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
                     {savingOpts ? "套用中…" : "套用"}</button>
                 </div>
 
-                <div className="border-t border-white/10 pt-2.5 space-y-2">
-                  <div className="text-white/40 text-[11px]">
+                <div className="border-t border-fg/10 pt-2.5 space-y-2">
+                  <div className="text-fg/40 text-[11px]">
                     字元集轉換{curCollation ? ` · 目前定序：${curCollation}` : ""}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <select value={charset} onChange={(e) => setCharset(e.target.value)} title="字元集"
-                      className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 text-xs">
+                      className="bg-well border border-fg/15 rounded px-2 py-1 text-xs">
                       {CHARSETS.map((cs) => <option key={cs} value={cs}>{cs}</option>)}
                     </select>
                     <input value={collation} onChange={(e) => setCollation(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))}
                       title="定序（可留空用預設）"
-                      className="bg-[#0c1118] border border-white/15 rounded px-2 py-1 text-xs w-48 mono" placeholder="定序（預設）" />
+                      className="bg-well border border-fg/15 rounded px-2 py-1 text-xs w-48 mono" placeholder="定序（預設）" />
                     <button type="button" onClick={convertCharset} disabled={converting}
                       className="px-3 py-1.5 text-xs rounded border border-amber-400/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
                       {converting ? "轉換中…" : "轉換字元集"}</button>
@@ -196,12 +201,12 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
           <Section title={`欄位（${cols?.length ?? 0}）`}>
             {cols == null ? <Empty text="載入中…" /> : cols.length === 0 ? <Empty text="（無）" /> : (
               <table className="w-full text-xs">
-                <thead className="text-white/40">
+                <thead className="text-fg/40">
                   <tr><Th>欄名</Th><Th>型別</Th><Th>NULL</Th><Th>鍵</Th><Th>預設</Th><Th>註解</Th></tr>
                 </thead>
                 <tbody>
                   {cols.map((c) => (
-                    <tr key={c.name} className="border-t border-white/5">
+                    <tr key={c.name} className="border-t border-fg/5">
                       <Td mono>{c.name}</Td>
                       <Td>{c.data_type}</Td>
                       <Td>{c.nullable ? "是" : "否"}</Td>
@@ -218,12 +223,12 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
           <Section title={`索引（${idx?.length ?? 0}）`}>
             {idx == null ? <Empty text="載入中…" /> : idx.length === 0 ? <Empty text="（無）" /> : (
               <table className="w-full text-xs">
-                <thead className="text-white/40">
+                <thead className="text-fg/40">
                   <tr><Th>名稱</Th><Th>欄位</Th><Th>唯一</Th><Th>主鍵</Th></tr>
                 </thead>
                 <tbody>
                   {idx.map((ix) => (
-                    <tr key={ix.name} className="border-t border-white/5">
+                    <tr key={ix.name} className="border-t border-fg/5">
                       <Td mono>{ix.name}</Td>
                       <Td mono>{ix.columns.join(", ")}</Td>
                       <Td>{ix.unique ? "是" : "否"}</Td>
@@ -234,39 +239,32 @@ export default function TableProperties({ connId, db, table, kind, objKind, onCl
               </table>
             )}
           </Section>
-        </div>
-
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">關閉</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-white/10 px-3 py-2">
-      <div className="text-xs text-white/40">{label}</div>
-      <div className="text-base mono text-white/90 mt-0.5">{value}</div>
+    <div className="rounded border border-fg/10 px-3 py-2">
+      <div className="text-xs text-fg/40">{label}</div>
+      <div className="text-base mono text-fg/90 mt-0.5">{value}</div>
     </div>
   );
 }
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-xs text-white/45 uppercase tracking-wide mb-1.5">{title}</div>
-      <div className="rounded border border-white/10 overflow-hidden">{children}</div>
+      <div className="text-xs text-fg/45 uppercase tracking-wide mb-1.5">{title}</div>
+      <div className="rounded border border-fg/10 overflow-hidden">{children}</div>
     </div>
   );
 }
 function Empty({ text }: { text: string }) {
-  return <div className="text-white/40 text-xs px-3 py-2">{text}</div>;
+  return <div className="text-fg/40 text-xs px-3 py-2">{text}</div>;
 }
 function Th({ children }: { children: React.ReactNode }) {
   return <th className="text-left font-normal px-3 py-1.5">{children}</th>;
 }
 function Td({ children, mono }: { children: React.ReactNode; mono?: boolean }) {
-  return <td className={`px-3 py-1 text-white/80 ${mono ? "mono" : ""}`}>{children}</td>;
+  return <td className={`px-3 py-1 text-fg/80 ${mono ? "mono" : ""}`}>{children}</td>;
 }

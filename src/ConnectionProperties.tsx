@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ConnectionConfig, KIND_META, PoolStatus } from "./api";
-import { useEscToClose } from "./ui";
+import { Modal, Button } from "./ui/index";
 
 // 連線（伺服器）屬性：唯讀檢視連線設定 + 即時連線池狀態 / 延遲。
 export default function ConnectionProperties({ conn, connected, onClose }: {
@@ -8,7 +8,6 @@ export default function ConnectionProperties({ conn, connected, onClose }: {
   connected: boolean;
   onClose: () => void;
 }) {
-  useEscToClose(onClose);
   const meta = KIND_META[conn.kind];
   const [pool, setPool] = useState<PoolStatus | null>(null);
   const [ping, setPing] = useState<number | null>(null);
@@ -53,53 +52,50 @@ export default function ConnectionProperties({ conn, connected, onClose }: {
     : [];
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[95]" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[460px] max-w-[92vw] max-h-[88vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: meta?.color ?? "#888" }} />
+    <Modal
+      onClose={onClose}
+      size="md"
+      zClass="z-[95]"
+      className="!w-[460px]"
+      bodyClassName="p-5 space-y-4 overflow-auto text-sm"
+      title={
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: meta?.color ?? "#888" }} />
           <span className="font-medium text-sm truncate">{conn.name}</span>
-          <span className={`ml-1 text-xs px-1.5 py-0.5 rounded ${connected ? "bg-green-500/15 text-green-400" : "bg-white/10 text-white/40"}`}>
+          <span className={`ml-1 text-xs px-1.5 py-0.5 rounded shrink-0 ${connected ? "bg-green-500/15 text-green-400" : "bg-fg/10 text-fg/40"}`}>
             {connected ? "已連線" : "未連線"}
           </span>
-          <button type="button" onClick={onClose} className="ml-auto text-white/40 hover:text-white">✕</button>
         </div>
+      }
+      footer={<Button variant="secondary" onClick={onClose}>關閉</Button>}
+    >
+      <Section title="連線">
+        {connRows.map(([k, v]) => <Row key={k} k={k} v={v} />)}
+      </Section>
 
-        <div className="p-5 space-y-4 overflow-auto text-sm">
-          <Section title="連線">
-            {connRows.map(([k, v]) => <Row key={k} k={k} v={v} />)}
-          </Section>
+      {sshRows.length > 0 && (
+        <Section title="SSH 通道">
+          {sshRows.map(([k, v]) => <Row key={k} k={k} v={v} />)}
+        </Section>
+      )}
 
-          {sshRows.length > 0 && (
-            <Section title="SSH 通道">
-              {sshRows.map(([k, v]) => <Row key={k} k={k} v={v} />)}
-            </Section>
-          )}
-
-          <Section title="即時狀態" action={connected ? (
-            <button type="button" onClick={() => void refresh()} disabled={busy}
-              className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">{busy ? "更新中…" : "重新整理"}</button>
-          ) : undefined}>
-            {!connected ? (
-              <div className="text-white/40 text-xs py-1">未連線，無即時狀態。</div>
-            ) : (
-              <>
-                <Row k="連線延遲" v={ping == null ? "—" : `${ping} ms`} />
-                {!meta?.fileBased && (
-                  <Row k="連線池（使用 / 閒置 / 總計）"
-                    v={pool ? `${pool.in_use} / ${pool.idle} / ${pool.size}` : "—"} />
-                )}
-              </>
+      <Section title="即時狀態" action={connected ? (
+        <button type="button" onClick={() => void refresh()} disabled={busy}
+          className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">{busy ? "更新中…" : "重新整理"}</button>
+      ) : undefined}>
+        {!connected ? (
+          <div className="text-fg/40 text-xs py-1">未連線，無即時狀態。</div>
+        ) : (
+          <>
+            <Row k="連線延遲" v={ping == null ? "—" : `${ping} ms`} />
+            {!meta?.fileBased && (
+              <Row k="連線池（使用 / 閒置 / 總計）"
+                v={pool ? `${pool.in_use} / ${pool.idle} / ${pool.size}` : "—"} />
             )}
-          </Section>
-        </div>
-
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">關閉</button>
-        </div>
-      </div>
-    </div>
+          </>
+        )}
+      </Section>
+    </Modal>
   );
 }
 
@@ -107,10 +103,10 @@ function Section({ title, action, children }: { title: string; action?: React.Re
   return (
     <div>
       <div className="flex items-center mb-1.5">
-        <span className="text-xs text-white/45 uppercase tracking-wide">{title}</span>
+        <span className="text-xs text-fg/45 uppercase tracking-wide">{title}</span>
         {action && <span className="ml-auto">{action}</span>}
       </div>
-      <div className="rounded border border-white/10 divide-y divide-white/5">{children}</div>
+      <div className="rounded border border-fg/10 divide-y divide-fg/5">{children}</div>
     </div>
   );
 }
@@ -118,8 +114,8 @@ function Section({ title, action, children }: { title: string; action?: React.Re
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex px-3 py-1.5 gap-3">
-      <span className="text-white/45 w-40 shrink-0">{k}</span>
-      <span className="text-white/85 mono break-all">{v}</span>
+      <span className="text-fg/45 w-40 shrink-0">{k}</span>
+      <span className="text-fg/85 mono break-all">{v}</span>
     </div>
   );
 }

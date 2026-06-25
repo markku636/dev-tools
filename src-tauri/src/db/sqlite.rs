@@ -3,9 +3,10 @@ use sqlx::{Column, Row, SqlitePool, TypeInfo, ValueRef};
 use std::time::Duration;
 
 use crate::db::{
-    filter_op_sql, op_needs_value, AlterOp, CellEdit, ColumnInfo, ColumnStats, ConnectionConfig, DataQuery,
-    DatabaseDriver, ErColumn, ErModel, ErRelation, ErTable, Filter, IndexInfo, PagedData,
-    PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, Sort, SortDir, TableInfo,
+    filter_op_sql, finalize_hits, like_contains, make_snippet, op_needs_value, sqlx_db_message, AlterOp, CellEdit,
+    ColumnInfo, ColumnStats, ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErRelation, ErTable,
+    Filter, IndexInfo, PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, SearchHit,
+    SearchOptions, Sort, SortDir, TableInfo, ValidationReport,
 };
 use crate::error::{AppError, AppResult};
 
@@ -108,6 +109,123 @@ impl DatabaseDriver for SqliteDriver {
         }
     }
 
+    async fn search_objects(&self, opts: &SearchOptions) -> AppResult<Vec<SearchHit>> {
+        if opts.term.is_empty() || opts.no_scope() {
+            return Ok(vec![]);
+        }
+        // SQLite 僅單一邏輯庫 "main"；若指定的 databases 不含 main 則無結果。
+        if let Some(list) = &opts.databases {
+            if !list.is_empty() && !list.iter().any(|d| d == "main") {
+                return Ok(vec![]);
+            }
+        }
+        let pattern = like_contains(&opts.term);
+        let mut hits: Vec<SearchHit> = Vec::new();
+
+        let classify = |name: &str, def: Option<&str>| -> Option<(&'static str, Option<String>)> {
+            if opts.match_names && opts.hit(name) {
+                return Some(("name", None));
+            }
+            if opts.match_definitions {
+                if let Some(d) = def {
+                    if opts.hit(d) {
+                        return Some(("definition", make_snippet(d, &opts.term, opts.case_sensitive)));
+                    }
+                }
+            }
+            None
+        };
+
+        // 1. sqlite_master：表 / 視圖 / 觸發器 / 索引（名稱；view/trigger 另比對 sql 定義內文）。
+        let mut conds: Vec<&str> = Vec::new();
+        if opts.match_names {
+            conds.push("name LIKE ? ESCAPE '\\'");
+        }
+        if opts.match_definitions {
+            conds.push("(type IN ('view','trigger') AND sql LIKE ? ESCAPE '\\')");
+        }
+        if !conds.is_empty() {
+            let sql = format!(
+                "SELECT type, name, tbl_name, sql FROM sqlite_master \
+                 WHERE type IN ('table','view','trigger','index') AND name NOT LIKE 'sqlite_%' AND ({})",
+                conds.join(" OR ")
+            );
+            let mut q = sqlx::query(&sql);
+            for _ in 0..conds.len() {
+                q = q.bind(pattern.clone());
+            }
+            let rows = q
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| AppError::Query(e.to_string()))?;
+            for r in &rows {
+                let otype: String = r.try_get(0).unwrap_or_default();
+                if !opts.wants_type(&otype) {
+                    continue;
+                }
+                let name: String = r.try_get(1).unwrap_or_default();
+                let tbl: Option<String> = r.try_get(2).ok();
+                let def: Option<String> = if otype == "view" || otype == "trigger" {
+                    r.try_get::<Option<String>, _>(3).ok().flatten()
+                } else {
+                    None
+                };
+                let (m, snip) = match classify(&name, def.as_deref()) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let parent = if otype == "trigger" || otype == "index" { tbl } else { None };
+                hits.push(SearchHit {
+                    database: "main".into(),
+                    object_type: otype,
+                    object_name: name,
+                    parent,
+                    matched_in: m.into(),
+                    snippet: snip,
+                    extra: None,
+                });
+            }
+        }
+
+        // 2. 欄位（名稱；SQLite 無欄位註解）。逐表 PRAGMA table_info。
+        if opts.wants_type("column") && opts.match_names {
+            let tlist = sqlx::query(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'",
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))?;
+            for tr in &tlist {
+                let table: String = match tr.try_get(0) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let cols = sqlx::query(&format!("PRAGMA table_info({})", quote_ident(&table)))
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(|e| AppError::Query(e.to_string()))?;
+                for c in &cols {
+                    let cname: String = c.try_get(1).unwrap_or_default();
+                    if !opts.hit(&cname) {
+                        continue;
+                    }
+                    let ctype: String = c.try_get(2).unwrap_or_default();
+                    hits.push(SearchHit {
+                        database: "main".into(),
+                        object_type: "column".into(),
+                        object_name: cname,
+                        parent: Some(table.clone()),
+                        matched_in: "name".into(),
+                        snippet: None,
+                        extra: if ctype.is_empty() { None } else { Some(ctype) },
+                    });
+                }
+            }
+        }
+
+        Ok(finalize_hits(hits, opts))
+    }
+
     async fn exec_ddl(&self, sql: &str) -> AppResult<()> {
         use sqlx::Executor;
         self.pool
@@ -115,6 +233,18 @@ impl DatabaseDriver for SqliteDriver {
             .await
             .map(|_| ())
             .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn validate_ddl(&self, _database: &str, sql: &str) -> AppResult<ValidationReport> {
+        // SQLite 的 DDL 具交易性：交易內試行 CREATE TRIGGER（建立時即檢查所引用的表 / 欄），再 ROLLBACK。
+        use sqlx::Executor;
+        let mut tx = self.pool.begin().await.map_err(|e| AppError::Query(e.to_string()))?;
+        let res = (&mut *tx).execute(sql).await;
+        let _ = tx.rollback().await;
+        match res {
+            Ok(_) => Ok(ValidationReport::passed()),
+            Err(e) => Ok(ValidationReport::failed(sqlx_db_message(&e), None)),
+        }
     }
 
     async fn table_columns(

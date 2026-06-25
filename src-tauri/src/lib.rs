@@ -1,3 +1,4 @@
+mod agent;
 mod backup;
 mod commands;
 mod db;
@@ -28,6 +29,7 @@ pub fn run() {
             schedules: Arc::new(Mutex::new(Vec::new())),
             history_lock: Arc::new(tokio::sync::Mutex::new(())),
             pubsub: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            agent_jobs: Arc::new(Mutex::new(std::collections::HashMap::new())),
         })
         .setup(|app| {
             let handle = app.handle().clone();
@@ -80,7 +82,9 @@ pub fn run() {
             commands::drop_database,
             commands::list_routines,
             commands::routine_definition,
+            commands::search_objects,
             commands::exec_ddl,
+            commands::validate_ddl,
             commands::alter_table,
             commands::er_model,
             commands::table_ddl,
@@ -111,6 +115,11 @@ pub fn run() {
             commands::list_backup_history,
             commands::restore_from_history,
             commands::clear_history,
+            agent::claude_detect,
+            agent::claude_send,
+            agent::claude_cancel,
+            agent::open_agent_workspace,
+            agent::open_external,
         ])
         .on_window_event(|window, event| {
             // 視窗關閉時，優雅釋放所有連線池（呼應規劃 3.5）。

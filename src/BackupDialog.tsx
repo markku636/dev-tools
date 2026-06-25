@@ -8,6 +8,8 @@ import {
   KIND_META,
 } from "./api";
 import { pickDirectory, pickOpenFile, pickSaveFile, uiConfirm } from "./ui";
+import { Modal, Button, Segmented } from "./ui/index";
+import { DatabaseBackup } from "lucide-react";
 
 interface Props {
   conn: ConnectionConfig;
@@ -21,42 +23,36 @@ export default function BackupDialog({ conn, database, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("manual");
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[640px] max-h-[85vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 font-medium text-sm flex items-center gap-2">
-          備份 / 還原
-          <span className="text-xs text-white/40">· {conn.name}</span>
-        </div>
-
-        {/* 分頁 */}
-        <div className="flex border-b border-white/10 text-sm">
-          {([["manual", "手動"], ["schedules", "排程"], ["history", "歷史"]] as [Tab, string][]).map(
-            ([t, label]) => (
-              <button key={t} type="button" onClick={() => setTab(t)}
-                className={`px-4 py-2 border-b-2 -mb-px ${
-                  tab === t ? "border-blue-500 text-blue-300" : "border-transparent text-white/50 hover:text-white/80"
-                }`}>
-                {label}
-              </button>
-            )
-          )}
-        </div>
-
-        <div className="p-5 overflow-y-auto">
-          {tab === "manual" && <ManualTab conn={conn} database={database} />}
-          {tab === "schedules" && <SchedulesTab conn={conn} />}
-          {tab === "history" && <HistoryTab conn={conn} />}
-        </div>
-
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end">
-          <button onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">
-            關閉
-          </button>
-        </div>
+    <Modal
+      onClose={onClose}
+      title={<>備份 / 還原<span className="text-xs text-fg/40 ml-1">· {conn.name}</span></>}
+      icon={DatabaseBackup}
+      size="lg"
+      zClass="z-50"
+      className="!w-[640px]"
+      bodyClassName="p-0 flex flex-col min-h-0 overflow-hidden"
+      footer={<Button variant="secondary" onClick={onClose}>關閉</Button>}
+    >
+      {/* 分頁 */}
+      <div className="flex border-b border-fg/10 text-sm shrink-0">
+        {([["manual", "手動"], ["schedules", "排程"], ["history", "歷史"]] as [Tab, string][]).map(
+          ([t, label]) => (
+            <button key={t} type="button" onClick={() => setTab(t)}
+              className={`px-4 py-2 border-b-2 -mb-px ${
+                tab === t ? "border-accent text-accent" : "border-transparent text-fg/50 hover:text-fg/80"
+              }`}>
+              {label}
+            </button>
+          )
+        )}
       </div>
-    </div>
+
+      <div className="p-5 overflow-y-auto flex-1 min-h-0">
+        {tab === "manual" && <ManualTab conn={conn} database={database} />}
+        {tab === "schedules" && <SchedulesTab conn={conn} />}
+        {tab === "history" && <HistoryTab conn={conn} />}
+      </div>
+    </Modal>
   );
 }
 
@@ -100,20 +96,20 @@ function ManualTab({ conn, database }: { conn: ConnectionConfig; database: strin
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-2">
-        {(["backup", "restore"] as const).map((m) => (
-          <button key={m} type="button" onClick={() => { setMode(m); setMsg(null); }}
-            className={`flex-1 py-1.5 rounded text-sm border ${
-              mode === m ? "border-blue-500 bg-blue-500/15 text-blue-300" : "border-white/10 text-white/50"
-            }`}>
-            {m === "backup" ? "備份" : "還原"}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        full
+        ariaLabel="備份或還原"
+        value={mode}
+        onChange={(m) => { setMode(m); setMsg(null); }}
+        options={[
+          { value: "backup", label: "備份" },
+          { value: "restore", label: "還原" },
+        ]}
+      />
 
       {!fileBased && (
         <div className={`text-xs rounded px-2 py-1.5 ${
-          cliOk === null ? "bg-white/5 text-white/40"
+          cliOk === null ? "bg-fg/5 text-fg/40"
             : cliOk ? "bg-green-500/10 text-green-400"
             : "bg-amber-500/10 text-amber-400"
         }`}>
@@ -141,7 +137,7 @@ function ManualTab({ conn, database }: { conn: ConnectionConfig; database: strin
                 : await pickOpenFile(filters);
               if (p) setPath(p);
             }}
-            className="shrink-0 px-3 rounded border border-white/15 hover:bg-white/5 text-sm mono">
+            className="shrink-0 px-3 rounded border border-fg/15 hover:bg-fg/5 text-sm mono">
             瀏覽…
           </button>
         </div>
@@ -158,7 +154,8 @@ function ManualTab({ conn, database }: { conn: ConnectionConfig; database: strin
       )}
 
       <div className="flex justify-end">
-        <button type="button" onClick={run} disabled={busy}
+        <button type="button" onClick={run} disabled={busy || (!fileBased && cliOk === false)}
+          title={!fileBased && cliOk === false ? `找不到 ${hint.tool}，請先安裝再使用` : undefined}
           className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
           {busy ? "執行中…" : mode === "backup" ? "開始備份" : "開始還原"}
         </button>
@@ -223,21 +220,21 @@ function SchedulesTab({ conn }: { conn: ConnectionConfig }) {
 
   return (
     <div className="space-y-4">
-      <div className="text-xs text-white/40">
+      <div className="text-xs text-fg/40">
         排程僅在 at-kit 開啟時執行；關閉期間到期者不會補跑。
       </div>
 
       {/* 既有排程 */}
       <div className="space-y-2">
-        {list.length === 0 && <div className="text-sm text-white/30">尚無排程。</div>}
+        {list.length === 0 && <div className="text-sm text-fg/30">尚無排程。</div>}
         {list.map((s) => (
-          <div key={s.id} className="border border-white/10 rounded px-3 py-2 text-sm flex items-center gap-3">
+          <div key={s.id} className="border border-fg/10 rounded px-3 py-2 text-sm flex items-center gap-3">
             <div className="flex-1 min-w-0">
               <div className="truncate">
-                <span className="text-white/80">{s.database || "（整庫）"}</span>
-                <span className="text-white/40"> · {cadenceText(s.cadence)}</span>
+                <span className="text-fg/80">{s.database || "（整庫）"}</span>
+                <span className="text-fg/40"> · {cadenceText(s.cadence)}</span>
               </div>
-              <div className="text-xs text-white/40 truncate" title={s.target_dir}>
+              <div className="text-xs text-fg/40 truncate" title={s.target_dir}>
                 → {s.target_dir}
                 {s.next_run && ` · 下次 ${fmtTime(s.next_run)}`}
                 {s.retention_count ? ` · 保留 ${s.retention_count} 份` : ""}
@@ -246,12 +243,12 @@ function SchedulesTab({ conn }: { conn: ConnectionConfig }) {
             <button type="button" title="啟用 / 停用"
               onClick={() => act(() => api.toggleSchedule(s.id, !s.enabled))}
               className={`px-2 py-0.5 rounded text-xs border ${
-                s.enabled ? "border-green-500/50 text-green-400" : "border-white/15 text-white/40"
+                s.enabled ? "border-green-500/50 text-green-400" : "border-fg/15 text-fg/40"
               }`}>
               {s.enabled ? "啟用中" : "已停用"}
             </button>
             <button type="button" onClick={() => act(() => api.runScheduleNow(s.id))}
-              className="px-2 py-0.5 rounded text-xs border border-white/15 hover:bg-white/5">
+              className="px-2 py-0.5 rounded text-xs border border-fg/15 hover:bg-fg/5">
               立即執行
             </button>
             <button type="button" onClick={() => act(() => api.removeSchedule(s.id))}
@@ -263,8 +260,8 @@ function SchedulesTab({ conn }: { conn: ConnectionConfig }) {
       </div>
 
       {/* 新增排程 */}
-      <div className="border-t border-white/10 pt-3 space-y-3">
-        <div className="text-xs text-white/50">新增排程</div>
+      <div className="border-t border-fg/10 pt-3 space-y-3">
+        <div className="text-xs text-fg/50">新增排程</div>
         <div className="flex gap-3">
           {conn.kind !== "redis" && (
             <Field label="資料庫名稱" className="flex-1">
@@ -277,23 +274,24 @@ function SchedulesTab({ conn }: { conn: ConnectionConfig }) {
                 placeholder="例如 C:\\backups" />
               <button type="button" title="選擇目錄…"
                 onClick={async () => { const d = await pickDirectory(); if (d) setDir(d); }}
-                className="shrink-0 px-3 rounded border border-white/15 hover:bg-white/5 text-sm mono">
+                className="shrink-0 px-3 rounded border border-fg/15 hover:bg-fg/5 text-sm mono">
                 瀏覽…
               </button>
             </div>
           </Field>
         </div>
 
-        <div className="flex gap-2">
-          {(["every_minutes", "every_hours", "daily_at"] as Cadence["type"][]).map((t) => (
-            <button key={t} type="button" onClick={() => setCType(t)}
-              className={`flex-1 py-1 rounded text-xs border ${
-                cType === t ? "border-blue-500 bg-blue-500/15 text-blue-300" : "border-white/10 text-white/50"
-              }`}>
-              {t === "every_minutes" ? "每 N 分" : t === "every_hours" ? "每 N 時" : "每天定時"}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          full
+          ariaLabel="排程頻率"
+          value={cType}
+          onChange={setCType}
+          options={[
+            { value: "every_minutes", label: "每 N 分" },
+            { value: "every_hours", label: "每 N 時" },
+            { value: "daily_at", label: "每天定時" },
+          ]}
+        />
 
         <div className="flex gap-3 items-end">
           {cType === "every_minutes" && (
@@ -384,18 +382,18 @@ function HistoryTab({ conn }: { conn: ConnectionConfig }) {
         <div className={`text-sm break-all ${msg.ok ? "text-green-400" : "text-red-400"}`}>{msg.text}</div>
       )}
       {list.length === 0 ? (
-        <div className="text-sm text-white/30">尚無備份歷史。</div>
+        <div className="text-sm text-fg/30">尚無備份歷史。</div>
       ) : (
         <div className="space-y-1.5">
           {list.map((e) => (
-            <div key={e.id} className="border border-white/10 rounded px-3 py-2 text-sm flex items-center gap-3">
+            <div key={e.id} className="border border-fg/10 rounded px-3 py-2 text-sm flex items-center gap-3">
               <span className={`w-2 h-2 rounded-full shrink-0 ${e.status === "ok" ? "bg-green-500" : "bg-red-500"}`} />
               <div className="flex-1 min-w-0">
                 <div className="truncate">
-                  <span className="text-white/80">{e.database || "（整庫）"}</span>
-                  <span className="text-white/40"> · {fmtTime(e.finished_at)}</span>
+                  <span className="text-fg/80">{e.database || "（整庫）"}</span>
+                  <span className="text-fg/40"> · {fmtTime(e.finished_at)}</span>
                 </div>
-                <div className="text-xs text-white/40 truncate" title={e.error ?? e.path}>
+                <div className="text-xs text-fg/40 truncate" title={e.error ?? e.path}>
                   {e.status === "ok"
                     ? `${formatBytes(e.bytes)} · ${e.method} · ${e.path}`
                     : `失敗：${e.error ?? "未知錯誤"}`}
@@ -403,7 +401,7 @@ function HistoryTab({ conn }: { conn: ConnectionConfig }) {
               </div>
               {e.status === "ok" && e.kind !== "redis" && (
                 <button type="button" onClick={() => restore(e)}
-                  className="px-2 py-0.5 rounded text-xs border border-white/15 hover:bg-white/5 shrink-0">
+                  className="px-2 py-0.5 rounded text-xs border border-fg/15 hover:bg-fg/5 shrink-0">
                   還原
                 </button>
               )}
@@ -432,14 +430,14 @@ const TOOL_HINT: Record<string, { tool: string; ext: string }> = {
 };
 
 const input =
-  "w-full bg-black/30 border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-500 mono";
+  "w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm outline-none focus:border-accent mono";
 
 function Field({ label, children, className = "" }: {
   label: string; children: React.ReactNode; className?: string;
 }) {
   return (
     <label className={`block ${className}`}>
-      <span className="text-xs text-white/50 mb-1 block">{label}</span>
+      <span className="text-xs text-fg/50 mb-1 block">{label}</span>
       {children}
     </label>
   );

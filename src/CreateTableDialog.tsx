@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
+import { Minus, Plus, Table2 } from "lucide-react";
 import { api, DbKind } from "./api";
-import { buildCreateTable, NewColumn } from "./sql";
-import { toast, useEscToClose } from "./ui";
+import { buildCreateTable, NewColumn, TYPE_PRESETS } from "./sql";
+import { toast } from "./ui";
+import { Modal, Button } from "./ui/index";
+import Icon from "./ui/Icon";
 
 const emptyCol = (): NewColumn => ({
   name: "",
@@ -12,13 +15,6 @@ const emptyCol = (): NewColumn => ({
   default: "",
 });
 
-// 常見型別快捷（datalist 提示，仍可自由輸入）。
-const TYPE_PRESETS: Record<string, string[]> = {
-  postgres: ["SERIAL", "BIGSERIAL", "INT", "BIGINT", "NUMERIC(10,2)", "TEXT", "VARCHAR(255)", "BOOLEAN", "DATE", "TIMESTAMPTZ", "UUID", "JSONB"],
-  mysql: ["INT AUTO_INCREMENT", "INT", "BIGINT", "DECIMAL(10,2)", "TEXT", "VARCHAR(255)", "TINYINT(1)", "DATE", "DATETIME", "TIMESTAMP", "JSON"],
-  sqlite: ["INTEGER", "REAL", "TEXT", "BLOB", "NUMERIC"],
-};
-
 // 設計表結構（致敬 Navicat / DataGrip 的表設計器）：以欄位格組出 CREATE TABLE 並執行。
 export default function CreateTableDialog({ connId, database, kind, onClose, onCreated }: {
   connId: string;
@@ -27,7 +23,6 @@ export default function CreateTableDialog({ connId, database, kind, onClose, onC
   onClose: () => void;
   onCreated?: () => void;
 }) {
-  useEscToClose(onClose);
   const defaultIdType =
     kind === "postgres" ? "SERIAL" : kind === "mysql" ? "INT AUTO_INCREMENT" : "INTEGER";
   const [table, setTable] = useState("");
@@ -42,7 +37,18 @@ export default function CreateTableDialog({ connId, database, kind, onClose, onC
   const addCol = () => setColumns((cs) => [...cs, emptyCol()]);
   const removeCol = (i: number) => setColumns((cs) => (cs.length > 1 ? cs.filter((_, j) => j !== i) : cs));
 
-  const valid = !!table.trim() && columns.some((c) => c.name.trim() && c.type.trim());
+  // 重複欄名（不分大小寫，對齊多數資料庫）——提前在前端攔，免得送出後才收到 DB 錯誤。
+  const dupCol = (() => {
+    const seen = new Set<string>();
+    for (const c of columns) {
+      const n = c.name.trim().toLowerCase();
+      if (!n) continue;
+      if (seen.has(n)) return c.name.trim();
+      seen.add(n);
+    }
+    return null;
+  })();
+  const valid = !!table.trim() && columns.some((c) => c.name.trim() && c.type.trim()) && !dupCol;
   const previewSql = useMemo(
     () => (valid ? buildCreateTable(kind, database, table, columns) : "—"),
     [valid, kind, database, table, columns],
@@ -64,18 +70,21 @@ export default function CreateTableDialog({ connId, database, kind, onClose, onC
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[95]" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[860px] max-w-[94vw] max-h-[88vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
-          <span className="font-medium text-sm">設計表結構</span>
-          <span className="text-xs text-white/40 mono">{database}</span>
-          <button type="button" onClick={onClose} className="ml-auto text-white/40 hover:text-white">✕</button>
-        </div>
-
-        <div className="p-5 space-y-3 overflow-auto">
+    <Modal
+      onClose={onClose}
+      title={<span className="flex items-center gap-2">設計表結構<span className="text-xs text-fg/40 mono">{database}</span></span>}
+      icon={Table2}
+      size="xl"
+      zClass="z-[95]"
+      className="!w-[860px]"
+      bodyClassName="p-5 space-y-3 overflow-auto"
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>取消</Button>
+        <Button variant="primary" loading={busy} disabled={busy || !valid} onClick={create}>建立資料表</Button>
+      </>}
+    >
           <label className="block">
-            <span className="text-xs text-white/50 mb-1 block">資料表名稱</span>
+            <span className="text-xs text-fg/50 mb-1 block">資料表名稱</span>
             <input autoFocus className={inputCls} value={table} onChange={(e) => setTable(e.target.value)}
               placeholder="例：users" />
           </label>
@@ -84,9 +93,9 @@ export default function CreateTableDialog({ connId, database, kind, onClose, onC
             {presets.map((t) => <option key={t} value={t} />)}
           </datalist>
 
-          <div className="border border-white/10 rounded overflow-hidden">
+          <div className="border border-fg/10 rounded overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-[#10161e] text-white/45 text-xs">
+              <thead className="bg-inset text-fg/45 text-xs">
                 <tr>
                   <th className="text-left px-2 py-1.5 font-normal">欄名</th>
                   <th className="text-left px-2 py-1.5 font-normal">型別</th>
@@ -99,7 +108,7 @@ export default function CreateTableDialog({ connId, database, kind, onClose, onC
               </thead>
               <tbody>
                 {columns.map((c, i) => (
-                  <tr key={i} className="border-t border-white/5">
+                  <tr key={i} className="border-t border-fg/5">
                     <td className="px-2 py-1">
                       <input className={cellCls} value={c.name} placeholder="欄名"
                         onChange={(e) => setCol(i, { name: e.target.value })} />
@@ -108,11 +117,11 @@ export default function CreateTableDialog({ connId, database, kind, onClose, onC
                       <input className={cellCls} list="atkit-type-presets" value={c.type} placeholder="型別"
                         onChange={(e) => setCol(i, { type: e.target.value })} />
                     </td>
-                    <td className="text-center"><input type="checkbox" checked={c.notNull}
+                    <td className="text-center"><input type="checkbox" aria-label="Not Null（不可為空）" checked={c.notNull}
                       onChange={(e) => setCol(i, { notNull: e.target.checked })} /></td>
-                    <td className="text-center"><input type="checkbox" checked={c.pk}
+                    <td className="text-center"><input type="checkbox" aria-label="主鍵（Primary Key）" checked={c.pk}
                       onChange={(e) => setCol(i, { pk: e.target.checked, notNull: e.target.checked ? true : c.notNull })} /></td>
-                    <td className="text-center"><input type="checkbox" checked={c.unique} disabled={c.pk}
+                    <td className="text-center"><input type="checkbox" aria-label="唯一（Unique）" checked={c.unique} disabled={c.pk}
                       onChange={(e) => setCol(i, { unique: e.target.checked })} /></td>
                     <td className="px-2 py-1">
                       <input className={cellCls} value={c.default} placeholder="（無）"
@@ -120,34 +129,27 @@ export default function CreateTableDialog({ connId, database, kind, onClose, onC
                     </td>
                     <td className="text-center">
                       <button type="button" title="刪除此欄" onClick={() => removeCol(i)}
-                        className="px-1 text-white/25 hover:text-red-400 disabled:opacity-20" disabled={columns.length <= 1}>−</button>
+                        className="px-1 text-fg/25 hover:text-red-400 disabled:opacity-20" disabled={columns.length <= 1}><Icon icon={Minus} size={14} /></button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <button type="button" onClick={addCol}
-              className="w-full px-2 py-1.5 text-xs text-white/50 hover:bg-white/5 border-t border-white/10">＋ 新增欄位</button>
+              className="w-full px-2 py-1.5 text-xs text-fg/50 hover:bg-fg/5 border-t border-fg/10 inline-flex items-center justify-center gap-1"><Icon icon={Plus} size={13} /> 新增欄位</button>
           </div>
+
+          {dupCol && (
+            <div className="text-xs text-danger">欄名重複：「{dupCol}」——請改名後再建立。</div>
+          )}
 
           <div>
-            <span className="text-xs text-white/40 mb-1 block">SQL 預覽</span>
-            <pre className="bg-black/30 border border-white/10 rounded p-3 text-xs mono text-white/70 overflow-auto max-h-40 whitespace-pre-wrap">{previewSql}</pre>
+            <span className="text-xs text-fg/40 mb-1 block">SQL 預覽</span>
+            <pre className="bg-inset border border-fg/10 rounded p-3 text-xs mono text-fg/70 overflow-auto max-h-40 whitespace-pre-wrap">{previewSql}</pre>
           </div>
-        </div>
-
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">取消</button>
-          <button type="button" onClick={create} disabled={busy || !valid}
-            className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40">
-            {busy ? "建立中…" : "建立資料表"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
-const inputCls = "w-full bg-black/30 border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-500";
-const cellCls = "w-full bg-black/20 border border-white/10 rounded px-1.5 py-1 text-sm mono outline-none focus:border-blue-500";
+const inputCls = "w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm outline-none focus:border-accent";
+const cellCls = "w-full bg-inset border border-fg/10 rounded px-1.5 py-1 text-sm mono outline-none focus:border-accent";

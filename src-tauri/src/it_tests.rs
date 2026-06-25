@@ -14,7 +14,7 @@ use crate::db::redis::RedisDriver;
 use crate::db::sqlite::SqliteDriver;
 use crate::db::{
     AlterOp, CellEdit, ConnectionConfig, DataQuery, DatabaseDriver, DbKind, Filter, KeyEdit,
-    QueryResult, RowDelete, RowInsert, Sort, SortDir, SshAuthMethod,
+    QueryResult, RowDelete, RowInsert, SearchOptions, Sort, SortDir, SshAuthMethod,
 };
 
 fn cfg(kind: DbKind, host: &str, port: u16, user: &str, pass: &str, db: Option<&str>) -> ConnectionConfig {
@@ -218,8 +218,10 @@ fn persisted_connection_drops_secrets() {
 
 #[tokio::test]
 async fn sqlite_crud_and_backup() {
-    let dbfile = "atkit_it_test.db";
-    let bakfile = "atkit_it_test.bak";
+    let dbfile = format!("atkit_it_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let bakfile = format!("atkit_it_test_{}.bak", std::process::id());
+    let bakfile = bakfile.as_str();
     let _ = std::fs::remove_file(dbfile);
     let _ = std::fs::remove_file(bakfile);
     let _ = std::fs::remove_file(format!("{dbfile}.bak"));
@@ -319,7 +321,8 @@ async fn sqlite_crud_and_backup() {
 /// 驗證引號含逗號的欄位、空欄位→NULL、整數欄位匯入、匯入列數統計。
 #[tokio::test]
 async fn import_csv_into_sqlite() {
-    let dbfile = "atkit_import_test.db";
+    let dbfile = format!("atkit_import_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
     let _ = std::fs::remove_file(dbfile);
     let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
     let mgr = crate::manager::ConnectionManager::new();
@@ -367,7 +370,8 @@ async fn import_csv_into_sqlite() {
 /// CSV 匯入錯誤處理：欄數不符回報失敗（含列號）、stop_on_error 遇錯即中止回 Err。
 #[tokio::test]
 async fn import_csv_reports_errors() {
-    let dbfile = "atkit_import_err_test.db";
+    let dbfile = format!("atkit_import_err_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
     let _ = std::fs::remove_file(dbfile);
     let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
     let mgr = crate::manager::ConnectionManager::new();
@@ -413,7 +417,8 @@ async fn import_csv_reports_errors() {
 /// 結構轉儲（schema_dump）：應含資料庫中每個表的建表 SQL。
 #[tokio::test]
 async fn schema_dump_lists_all_tables() {
-    let dbfile = "atkit_dump_test.db";
+    let dbfile = format!("atkit_dump_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
     let _ = std::fs::remove_file(dbfile);
     let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
     let mgr = crate::manager::ConnectionManager::new();
@@ -434,8 +439,10 @@ async fn schema_dump_lists_all_tables() {
 /// 匯出管線端到端（export()：分頁取資料 → render → 寫檔）。先前僅 render() 被單元測試。
 #[tokio::test]
 async fn export_table_to_csv_file() {
-    let dbfile = "atkit_export_test.db";
-    let outfile = "atkit_export_out.csv";
+    let dbfile = format!("atkit_export_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let outfile = format!("atkit_export_out_{}.csv", std::process::id());
+    let outfile = outfile.as_str();
     let _ = std::fs::remove_file(dbfile);
     let _ = std::fs::remove_file(outfile);
     let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
@@ -475,8 +482,10 @@ async fn export_table_to_csv_file() {
 /// 匯出 → 重新匯入往返：驗證 export 的引號跳脫與 import 的解析對稱（含逗號 / 引號 / 換行的值）。
 #[tokio::test]
 async fn export_import_round_trip() {
-    let dbfile = "atkit_rt_test.db";
-    let csvfile = "atkit_rt.csv";
+    let dbfile = format!("atkit_rt_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let csvfile = format!("atkit_rt_{}.csv", std::process::id());
+    let csvfile = csvfile.as_str();
     let _ = std::fs::remove_file(dbfile);
     let _ = std::fs::remove_file(csvfile);
     let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
@@ -535,7 +544,8 @@ async fn export_import_round_trip() {
 /// 欄位資料剖析（column_stats）：總數 / 非空 / 相異（含 NULL 與重複值）。
 #[tokio::test]
 async fn column_stats_counts() {
-    let dbfile = "atkit_stats_test.db";
+    let dbfile = format!("atkit_stats_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
     let _ = std::fs::remove_file(dbfile);
     let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
     let mgr = crate::manager::ConnectionManager::new();
@@ -567,6 +577,95 @@ async fn column_stats_counts() {
     );
 
     mgr.disconnect(id).await;
+    let _ = std::fs::remove_file(dbfile);
+}
+
+/// SQL Search 端到端（SQLite，免 Docker）：驗證跨型別搜尋（表 / 視圖 / 欄位 / 索引 / 觸發器）、
+/// 名稱 vs 定義內文比對、型別篩選、大小寫、資料庫範圍與 snippet 產生。
+/// 此測試同時涵蓋 db/mod.rs 的共用邏輯（like_contains 跳脫、make_snippet、finalize_hits、classify）。
+#[tokio::test]
+async fn sqlite_search_objects() {
+    let dbfile = format!("atkit_search_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let _ = std::fs::remove_file(dbfile);
+    let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
+    let d = SqliteDriver::connect(&c).await.unwrap();
+    d.query("CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT, note TEXT)").await.unwrap();
+    d.query("CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER)").await.unwrap();
+    d.query("CREATE VIEW active_customers AS SELECT id, email FROM customers WHERE note IS NOT NULL").await.unwrap();
+    d.create_index("main", "customers", "ix_email", &sv(&["email"]), false).await.unwrap();
+    d.exec_ddl("CREATE TRIGGER trg_audit AFTER INSERT ON orders BEGIN SELECT NEW.customer_id; END").await.unwrap();
+
+    let base = |term: &str| SearchOptions {
+        term: term.into(),
+        databases: None,
+        types: None,
+        match_names: true,
+        match_definitions: true,
+        match_comments: true,
+        case_sensitive: false,
+        limit: Some(500),
+    };
+
+    // 1. "email"：欄位名（customers.email）、索引名（ix_email）、視圖定義內文（active_customers）。
+    let hits = d.search_objects(&base("email")).await.unwrap();
+    assert!(
+        hits.iter().any(|h| h.object_type == "column" && h.object_name == "email" && h.parent.as_deref() == Some("customers")),
+        "應找到 customers.email 欄位：{hits:?}"
+    );
+    assert!(
+        hits.iter().any(|h| h.object_type == "index" && h.object_name == "ix_email"),
+        "應找到索引 ix_email：{hits:?}"
+    );
+    let view_hit = hits.iter().find(|h| h.object_type == "view" && h.object_name == "active_customers");
+    let view_hit = view_hit.expect("應找到視圖 active_customers（定義內文命中 email）");
+    assert_eq!(view_hit.matched_in, "definition", "視圖應為定義內文命中");
+    assert!(
+        view_hit.snippet.as_deref().is_some_and(|s| s.to_lowercase().contains("email")),
+        "視圖命中應帶含 email 的 snippet：{:?}",
+        view_hit.snippet
+    );
+
+    // 2. 僅比對定義內文（關閉名稱 / 註解）："customer_id" 應命中觸發器 body，不應有欄位命中。
+    let mut o = base("customer_id");
+    o.match_names = false;
+    o.match_comments = false;
+    let hits = d.search_objects(&o).await.unwrap();
+    assert!(
+        hits.iter().any(|h| h.object_type == "trigger" && h.object_name == "trg_audit" && h.matched_in == "definition"),
+        "僅定義模式應命中觸發器 trg_audit：{hits:?}"
+    );
+    assert!(
+        !hits.iter().any(|h| h.object_type == "column"),
+        "關閉名稱比對時不應有欄位命中：{hits:?}"
+    );
+
+    // 3. 型別篩選：types=[table] 時 "customers" 僅回傳資料表（視圖 active_customers 不應出現）。
+    let mut o = base("customers");
+    o.types = Some(vec!["table".into()]);
+    let hits = d.search_objects(&o).await.unwrap();
+    assert!(!hits.is_empty(), "應至少找到 customers 資料表");
+    assert!(hits.iter().all(|h| h.object_type == "table"), "型別篩選後應只有 table：{hits:?}");
+    assert!(hits.iter().any(|h| h.object_name == "customers"), "應含 customers 資料表");
+
+    // 4. 大小寫敏感："EMAIL" 不應命中小寫欄位 email。
+    let mut o = base("EMAIL");
+    o.case_sensitive = true;
+    let hits = d.search_objects(&o).await.unwrap();
+    assert!(
+        !hits.iter().any(|h| h.object_type == "column" && h.object_name == "email"),
+        "大小寫敏感搜尋 EMAIL 不應命中小寫欄位 email：{hits:?}"
+    );
+
+    // 5. 資料庫範圍：指定不存在的 db → 無結果；指定 main → 有結果。
+    let mut o = base("customers");
+    o.databases = Some(vec!["nonexistent".into()]);
+    assert!(d.search_objects(&o).await.unwrap().is_empty(), "指定不存在的資料庫應無結果");
+    let mut o = base("customers");
+    o.databases = Some(vec!["main".into()]);
+    assert!(!d.search_objects(&o).await.unwrap().is_empty(), "指定 main 應有結果");
+
+    d.close().await;
     let _ = std::fs::remove_file(dbfile);
 }
 
@@ -880,6 +979,42 @@ async fn mysql_full() {
         "MySQL 無主鍵的 update 應被拒"
     );
     d.query("DROP TABLE IF EXISTS nopk").await.unwrap();
+
+    // SQL Search（全資料庫物件搜尋）：名稱 / 定義內文 / 註解 / 型別篩選。
+    // 程序名刻意不含搜尋詞，確保命中來自「定義內文」而非名稱。
+    {
+        d.exec_ddl("DROP PROCEDURE IF EXISTS atkit_def_probe").await.unwrap();
+        d.query("DROP TABLE IF EXISTS atkit_search_t").await.unwrap();
+        d.query("CREATE TABLE atkit_search_t (id INT PRIMARY KEY, atkit_search_col VARCHAR(20) COMMENT 'atkit_search_note')").await.unwrap();
+        d.exec_ddl("CREATE PROCEDURE atkit_def_probe() BEGIN SELECT atkit_search_col FROM atkit_search_t; END").await.unwrap();
+        let base = SearchOptions {
+            term: "atkit_search".into(),
+            databases: None,
+            types: None,
+            match_names: true,
+            match_definitions: true,
+            match_comments: true,
+            case_sensitive: false,
+            limit: Some(500),
+        };
+        let hits = d.search_objects(&base).await.unwrap();
+        assert!(hits.iter().any(|h| h.object_type == "table" && h.object_name == "atkit_search_t"), "MySQL 搜尋應找到資料表：{hits:?}");
+        assert!(
+            hits.iter().any(|h| h.object_type == "column" && h.object_name == "atkit_search_col" && h.parent.as_deref() == Some("atkit_search_t")),
+            "MySQL 搜尋應找到欄位 atkit_search_col"
+        );
+        let sp = hits.iter().find(|h| h.object_type == "procedure" && h.object_name == "atkit_def_probe").expect("MySQL 搜尋應找到預存程序（定義內文命中）");
+        assert_eq!(sp.matched_in, "definition", "MySQL 程序應為定義內文命中");
+        assert!(sp.snippet.as_deref().is_some_and(|s| s.to_lowercase().contains("atkit_search")), "MySQL 定義命中應帶 snippet：{:?}", sp.snippet);
+        // 註解命中（COLUMN_COMMENT）：關閉名稱 / 定義，只比對註解。
+        let cmt = d.search_objects(&SearchOptions { term: "atkit_search_note".into(), match_names: false, match_definitions: false, ..base.clone() }).await.unwrap();
+        assert!(cmt.iter().any(|h| h.object_type == "column" && h.matched_in == "comment"), "MySQL 應以註解命中欄位：{cmt:?}");
+        // 型別篩選：只要 procedure。
+        let only = d.search_objects(&SearchOptions { types: Some(vec!["procedure".into()]), ..base.clone() }).await.unwrap();
+        assert!(!only.is_empty() && only.iter().all(|h| h.object_type == "procedure"), "MySQL 型別篩選後應只有 procedure：{only:?}");
+        d.exec_ddl("DROP PROCEDURE IF EXISTS atkit_def_probe").await.unwrap();
+        d.query("DROP TABLE IF EXISTS atkit_search_t").await.unwrap();
+    }
 
     d.close().await;
 }
@@ -1233,6 +1368,40 @@ async fn postgres_full() {
     );
     d.query("DROP TABLE IF EXISTS nopk").await.unwrap();
 
+    // SQL Search：名稱 / 定義內文（pg_get_functiondef）/ 註解（col_description）/ 型別篩選。
+    // 函式名刻意不含搜尋詞，確保命中來自「定義內文」而非名稱。
+    {
+        d.query("DROP FUNCTION IF EXISTS atkit_def_probe()").await.unwrap();
+        d.query("DROP TABLE IF EXISTS atkit_search_t").await.unwrap();
+        d.query("CREATE TABLE atkit_search_t (id INT PRIMARY KEY, atkit_search_col TEXT)").await.unwrap();
+        d.query("COMMENT ON COLUMN atkit_search_t.atkit_search_col IS 'atkit_search_note'").await.unwrap();
+        d.exec_ddl("CREATE OR REPLACE FUNCTION atkit_def_probe() RETURNS bigint LANGUAGE sql AS $$ SELECT count(*) FROM atkit_search_t $$").await.unwrap();
+        let base = SearchOptions {
+            term: "atkit_search".into(),
+            databases: None,
+            types: None,
+            match_names: true,
+            match_definitions: true,
+            match_comments: true,
+            case_sensitive: false,
+            limit: Some(500),
+        };
+        let hits = d.search_objects(&base).await.unwrap();
+        assert!(hits.iter().any(|h| h.object_type == "table" && h.object_name == "atkit_search_t"), "PG 搜尋應找到資料表：{hits:?}");
+        assert!(hits.iter().any(|h| h.object_type == "column" && h.object_name == "atkit_search_col"), "PG 搜尋應找到欄位 atkit_search_col");
+        let fnh = hits.iter().find(|h| h.object_type == "function" && h.object_name == "atkit_def_probe").expect("PG 搜尋應找到函式（定義內文命中）");
+        assert_eq!(fnh.matched_in, "definition", "PG 函式應為定義內文命中");
+        assert!(fnh.snippet.as_deref().is_some_and(|s| s.to_lowercase().contains("atkit_search")), "PG 定義命中應帶 snippet：{:?}", fnh.snippet);
+        // 註解命中（col_description）：關閉名稱 / 定義，只比對註解。
+        let cmt = d.search_objects(&SearchOptions { term: "atkit_search_note".into(), match_names: false, match_definitions: false, ..base.clone() }).await.unwrap();
+        assert!(cmt.iter().any(|h| h.object_type == "column" && h.matched_in == "comment"), "PG 應以註解命中欄位：{cmt:?}");
+        // 型別篩選：只要 function。
+        let only = d.search_objects(&SearchOptions { types: Some(vec!["function".into()]), ..base.clone() }).await.unwrap();
+        assert!(!only.is_empty() && only.iter().all(|h| h.object_type == "function"), "PG 型別篩選後應只有 function：{only:?}");
+        d.query("DROP FUNCTION IF EXISTS atkit_def_probe()").await.unwrap();
+        d.query("DROP TABLE IF EXISTS atkit_search_t").await.unwrap();
+    }
+
     d.close().await;
 }
 
@@ -1326,6 +1495,25 @@ async fn redis_full() {
         .unwrap();
     assert_eq!(n, 1, "DEL 應回報刪除 1 個鍵");
     assert_eq!(d.key_detail("0", "s1b").await.unwrap().unwrap().type_, "none", "刪除後 s1b 應消失");
+
+    // SQL Search（Redis：以 SCAN MATCH 比對鍵名）：搜 "set1" 應找到該鍵。
+    {
+        let opts = SearchOptions {
+            term: "set1".into(),
+            databases: Some(vec!["0".into()]),
+            types: None,
+            match_names: true,
+            match_definitions: false,
+            match_comments: false,
+            case_sensitive: false,
+            limit: Some(500),
+        };
+        let hits = d.search_objects(&opts).await.unwrap();
+        assert!(
+            hits.iter().any(|h| h.object_type == "key" && h.object_name == "set1"),
+            "Redis 搜尋應找到鍵 set1：{hits:?}"
+        );
+    }
 
     d.close().await;
 }
@@ -1539,6 +1727,25 @@ async fn mongo_full() {
         .unwrap();
     let gone = d.table_data("testdb", &coll, &dq(vec![filt("_id", "=", Some("custom1"))], vec![])).await.unwrap();
     assert_eq!(gone.rows.len(), 0, "依字串 _id 刪除後應消失");
+
+    // SQL Search（MongoDB：比對集合名稱）：搜 "people" 應找到本測試集合。
+    {
+        let opts = SearchOptions {
+            term: "people".into(),
+            databases: Some(vec!["testdb".into()]),
+            types: None,
+            match_names: true,
+            match_definitions: false,
+            match_comments: false,
+            case_sensitive: false,
+            limit: Some(500),
+        };
+        let hits = d.search_objects(&opts).await.unwrap();
+        assert!(
+            hits.iter().any(|h| h.object_type == "collection" && h.object_name == coll),
+            "Mongo 搜尋應找到集合 {coll}：{hits:?}"
+        );
+    }
 
     d.close().await;
 }

@@ -1,6 +1,6 @@
 // 純函式工具：查詢歷史 / 收藏 / 結果序列化 / SQL 多語句切分 / 跨資料庫識別字跳脫。
 // 抽離自 App.tsx / TableView.tsx 以便單元測試（見 sql.test.ts）且不依賴 React / Tauri。
-import type { DbKind, QueryResult } from "./api";
+import type { DbKind, QueryResult, RoutineInfo } from "./api";
 
 // ---- 跨資料庫識別字 / 字面值跳脫（MySQL / PostgreSQL / SQLite 一致性關鍵）----
 // 識別字：PostgreSQL 用雙引號，其餘（MySQL / SQLite）用反引號；內部引號加倍轉義。
@@ -30,6 +30,17 @@ export interface NewColumn {
   unique: boolean;
   default: string; // 空字串 = 無預設
 }
+
+// 常見型別快捷：供建表 / 新增欄位的型別下拉選單與 datalist 提示，選後仍可手動微調（如 VARCHAR 長度）。
+// 由 CreateTableDialog 與 TableView（AddColumnForm）共用，集中於此避免重複。
+export const TYPE_PRESETS: Record<DbKind, string[]> = {
+  postgres: ["SERIAL", "BIGSERIAL", "INT", "BIGINT", "NUMERIC(10,2)", "TEXT", "VARCHAR(255)", "BOOLEAN", "DATE", "TIMESTAMPTZ", "UUID", "JSONB"],
+  mysql: ["INT AUTO_INCREMENT", "INT", "BIGINT", "DECIMAL(10,2)", "TEXT", "VARCHAR(255)", "TINYINT(1)", "DATE", "DATETIME", "TIMESTAMP", "JSON"],
+  sqlite: ["INTEGER", "REAL", "TEXT", "BLOB", "NUMERIC"],
+  // 非 SQL（mongo / redis）不會用到型別下拉，但需滿足 Record<DbKind> 完整性。
+  mongo: [],
+  redis: [],
+};
 
 // 組 CREATE TABLE。識別字以 quoteIdent 跳脫（防注入）；型別 / 預設值為原樣插值（DDL 無法參數化，
 // 由使用者對自己的資料庫負責，與 ALTER TABLE ADD COLUMN 一致）。PK 以表級 PRIMARY KEY(...) 表示，
@@ -81,6 +92,53 @@ export function isSystemDatabase(kind: DbKind, name: string): boolean {
 export function buildTruncateTable(kind: DbKind, db: string, table: string): string {
   const q = qualifiedName(kind, db, table);
   return kind === "sqlite" ? `DELETE FROM ${q};` : `TRUNCATE TABLE ${q};`;
+}
+
+// 清空資料表（DELETE 全部列）：可復原（在交易內）、觸發 trigger、不重設自增。對標 Navicat「清空資料表」。
+// 與 buildTruncateTable（TRUNCATE，快但不可復原 / 不觸發 trigger）區分；SQLite 兩者皆為 DELETE。
+export function buildDeleteAllRows(kind: DbKind, db: string, table: string): string {
+  return `DELETE FROM ${qualifiedName(kind, db, table)};`;
+}
+
+// 由欄位 / 列資料組出字面值 INSERT 語句（供「傾印 SQL（含資料）」/ 資料字典之外的匯出）。
+// 識別字以 quoteIdent 跳脫、值以 sqlLiteral 跳脫，皆為方言感知（與後端 export sql 的 MySQL 固定方言不同，
+// 此處可正確產生 PG / SQLite 的傾印）。columns 為欄名、rows 為對齊欄序的字串 / null 值。
+export function buildInsertValues(
+  kind: DbKind,
+  db: string,
+  table: string,
+  columns: string[],
+  rows: (string | null)[][],
+): string {
+  const qtbl = qualifiedName(kind, db, table);
+  const collist = columns.map((c) => quoteIdent(kind, c)).join(", ");
+  return rows
+    .map((r) => `INSERT INTO ${qtbl} (${collist}) VALUES (${r.map((v) => sqlLiteral(kind, v)).join(", ")});`)
+    .join("\n");
+}
+
+// 資料表權限 GRANT / REVOKE 範本（送往查詢編輯器供使用者填入帳號後執行）。對標 Navicat「設定權限」。
+// 僅 MySQL / PostgreSQL（SQLite 無使用者 / 權限概念）。帳號以註解占位，由使用者替換為真實 user / role。
+export function buildGrantTemplate(kind: DbKind, db: string, table: string): string {
+  const q = qualifiedName(kind, db, table);
+  if (kind === "postgres") {
+    return [
+      `-- 資料表權限範本（PostgreSQL）：請將 <role> 換成實際角色名後執行。`,
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON ${q} TO <role>;`,
+      `-- 唯讀：GRANT SELECT ON ${q} TO <role>;`,
+      `-- 全部權限：GRANT ALL PRIVILEGES ON ${q} TO <role>;`,
+      `-- 收回：REVOKE ALL PRIVILEGES ON ${q} FROM <role>;`,
+    ].join("\n");
+  }
+  // MySQL：帳號為 'user'@'host' 形式。
+  return [
+    `-- 資料表權限範本（MySQL）：請將 'user'@'host' 換成實際帳號後執行。`,
+    `GRANT SELECT, INSERT, UPDATE, DELETE ON ${q} TO 'user'@'%';`,
+    `-- 唯讀：GRANT SELECT ON ${q} TO 'user'@'%';`,
+    `-- 全部權限：GRANT ALL PRIVILEGES ON ${q} TO 'user'@'%';`,
+    `-- 收回：REVOKE ALL PRIVILEGES ON ${q} FROM 'user'@'%';`,
+    `FLUSH PRIVILEGES;`,
+  ].join("\n");
 }
 
 // 重新命名：MySQL 用 RENAME TABLE（新名同 schema 限定）；PG / SQLite 用 ALTER TABLE … RENAME TO。
@@ -243,6 +301,22 @@ export function buildRoutineCall(kind: DbKind, db: string, name: string, routine
     return kind === "postgres" ? `SELECT * FROM ${q}(${a})` : `SELECT ${q}(${a}) AS result`;
   }
   return `CALL ${q}(${a})`;
+}
+
+// 組 routine 的 DROP 語句（刪除 / 先刪後建用）。
+// PG 函式 / 程序帶引數簽章以消除重載歧義（PG 對重載函式無簽章的 DROP 會報 "is not unique"）。
+export function buildDropRoutine(kind: DbKind, db: string, r: RoutineInfo): string {
+  const t = r.routine_type;
+  if (kind === "mysql") {
+    const kw = t === "procedure" ? "PROCEDURE" : t === "function" ? "FUNCTION" : t === "event" ? "EVENT" : "TRIGGER";
+    return `DROP ${kw} IF EXISTS ${qualifiedName(kind, db, r.name)}`;
+  }
+  if (kind === "postgres") {
+    if (t === "trigger") return `DROP TRIGGER IF EXISTS ${quoteIdent(kind, r.name)} ON ${qualifiedName(kind, db, r.parent ?? "")}`;
+    const sig = r.signature ?? "";
+    return `DROP ${t === "procedure" ? "PROCEDURE" : "FUNCTION"} IF EXISTS ${qualifiedName(kind, db, r.name)}(${sig})`;
+  }
+  return `DROP TRIGGER IF EXISTS ${quoteIdent(kind, r.name)}`;
 }
 
 // 重新命名索引：MySQL → ALTER TABLE … RENAME INDEX；PostgreSQL → ALTER INDEX（索引為 schema 物件）。
@@ -537,15 +611,113 @@ function stripCode(sql: string): string {
 }
 
 // 危險語句偵測（防手滑）：無 WHERE 的 UPDATE / DELETE，或 TRUNCATE。在字面值 / 註解外判斷關鍵字。
+// 移除所有成對括號內的內容（保留 depth-0 文字），供「危險語句」偵測排除子查詢。
+// 例：UPDATE t SET a=(SELECT … WHERE …) 的 WHERE 在子查詢內，去括號後頂層才看得出沒有 WHERE。
+function stripParens(s: string): string {
+  let out = "";
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === "(") depth++;
+    else if (ch === ")") { if (depth > 0) depth--; }
+    else if (depth === 0) out += ch;
+  }
+  return out;
+}
+
+// Redis 破壞性指令：FLUSHALL（清空所有 DB）/ FLUSHDB（清空目前 DB），無法復原，需確認。
+// 容許可選的 "N:" 資料庫前綴（查詢編輯器語法），如 "1: FLUSHDB"。
+export function isDangerousRedisCommand(cmd: string): boolean {
+  const c = cmd.replace(/^\s*\d+\s*:\s*/, "").trim();
+  return /^(flushall|flushdb)\b/i.test(c);
+}
+
 export function isDangerousStatement(sql: string): boolean {
   const code = stripCode(sql).toLowerCase().trim();
   if (/^truncate\b/.test(code)) return true;
-  if (/^(update|delete)\b/.test(code) && !/\bwhere\b/.test(code)) return true;
+  // WHERE 只計頂層（去掉子查詢括號）——否則 UPDATE t SET a=(SELECT…WHERE…) 會被誤判為安全卻其實改全表。
+  // 反向不會誤報：真正的頂層 WHERE 子句永遠不在括號內，去括號後仍在。
+  if (/^(update|delete)\b/.test(code) && !/\bwhere\b/.test(stripParens(code))) return true;
   return false;
 }
 
 export function fmtElapsed(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+}
+
+// ---- 輕量結構檢查（SQL 編輯器即時 lint）----
+// 只回報「在任何合法 SQL 都必為錯」的結構問題：未配對括號、未結束的字串 / 識別字 /
+// 註解 / $$ 區塊。刻意不做關鍵字或語意判斷（那會在預存程序程序體 BEGIN…END /
+// CASE…END / IF…END IF 上誤報），完整語法驗證交給後端 validate_ddl（資料庫引擎）。
+// 位置以「字元位移」回報，與 CodeMirror 文件位移一致。
+export interface SqlLintMark {
+  from: number;
+  to: number;
+  severity: "error" | "warning";
+  message: string;
+}
+
+export function lintSqlStructure(sql: string): SqlLintMark[] {
+  const marks: SqlLintMark[] = [];
+  const parens: number[] = []; // 未配對 '(' 的位置堆疊
+  const n = sql.length;
+  let i = 0;
+  while (i < n) {
+    const ch = sql[i];
+    const two = sql.slice(i, i + 2);
+    // 字串（'）/ 識別字（" 或 `）：內部相同引號加倍視為轉義。
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const start = i;
+      let j = i + 1;
+      let closed = false;
+      while (j < n) {
+        if (sql[j] === ch) {
+          if (sql[j + 1] === ch) { j += 2; continue; } // 加倍轉義
+          j++; closed = true; break;
+        }
+        j++;
+      }
+      if (!closed) {
+        const label = ch === "'" ? "字串" : ch === '"' ? '識別字（"）' : "識別字（`）";
+        marks.push({ from: start, to: n, severity: "error", message: `未結束的${label}` });
+        return marks; // 之後無法可靠掃描，提前結束
+      }
+      i = j;
+      continue;
+    }
+    if (two === "--") { let j = i; while (j < n && sql[j] !== "\n") j++; i = j; continue; }
+    if (two === "/*") {
+      const start = i;
+      let j = i + 2;
+      while (j < n && sql.slice(j, j + 2) !== "*/") j++;
+      if (j >= n) { marks.push({ from: start, to: n, severity: "error", message: "未結束的區塊註解 /* */" }); return marks; }
+      i = j + 2;
+      continue;
+    }
+    // PostgreSQL dollar-quoting：$$ 或 $tag$（需有對應結束標記）。
+    if (ch === "$") {
+      const m = /^\$[A-Za-z0-9_]*\$/.exec(sql.slice(i));
+      if (m) {
+        const tag = m[0];
+        const start = i;
+        let j = i + tag.length;
+        let closed = false;
+        while (j < n) { if (sql.startsWith(tag, j)) { j += tag.length; closed = true; break; } j++; }
+        if (!closed) { marks.push({ from: start, to: n, severity: "error", message: `未結束的 ${tag} 區塊` }); return marks; }
+        i = j;
+        continue;
+      }
+    }
+    if (ch === "(") { parens.push(i); i++; continue; }
+    if (ch === ")") {
+      if (parens.length === 0) marks.push({ from: i, to: i + 1, severity: "error", message: "多餘的右括號「)」" });
+      else parens.pop();
+      i++;
+      continue;
+    }
+    i++;
+  }
+  for (const p of parens) marks.push({ from: p, to: p + 1, severity: "error", message: "未配對的左括號「(」" });
+  return marks;
 }
 
 // 以分號切分多條 SQL，但略過字串字面量（' " `）、註解（-- 行、/* */ 區塊）
@@ -589,4 +761,70 @@ export function splitSqlStatements(sql: string): string[] {
   }
   if (cur.trim()) out.push(cur.trim());
   return out;
+}
+
+// 一條語句在原字串中的位移範圍（text 已去除前後空白）。
+export interface SqlStatementSpan {
+  text: string;
+  from: number;
+  to: number;
+}
+
+// 與 splitSqlStatements 同套字串 / 註解 / dollar-quote 規則，但保留每條語句在原字串中的位移，
+// 供「執行游標所在語句」定位（DataGrip / DBeaver 的 Ctrl+Enter 行為）。
+export function splitSqlStatementsWithRanges(sql: string): SqlStatementSpan[] {
+  const out: SqlStatementSpan[] = [];
+  let inS = false, inD = false, inBack = false, lineC = false, blockC = false;
+  let dollar: string | null = null;
+  let segStart = 0; // 目前語句（含前導空白）的起點
+  const push = (end: number) => {
+    // [segStart, end) 為一條語句（不含分號）；trim 兩端空白得到真正範圍。
+    let a = segStart, b = end;
+    while (a < b && /\s/.test(sql[a])) a++;
+    while (b > a && /\s/.test(sql[b - 1])) b--;
+    if (b > a) out.push({ text: sql.slice(a, b), from: a, to: b });
+  };
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const nx = sql[i + 1];
+    if (dollar) {
+      if (ch === "$" && sql.startsWith(dollar, i)) { i += dollar.length - 1; dollar = null; }
+      continue;
+    }
+    if (lineC) { if (ch === "\n") lineC = false; continue; }
+    if (blockC) { if (ch === "*" && nx === "/") { i++; blockC = false; } continue; }
+    if (inS) { if (ch === "'") { if (nx === "'") i++; else inS = false; } continue; }
+    if (inD) { if (ch === '"') { if (nx === '"') i++; else inD = false; } continue; }
+    if (inBack) { if (ch === "`") inBack = false; continue; }
+    if (ch === "-" && nx === "-") { lineC = true; continue; }
+    if (ch === "/" && nx === "*") { blockC = true; i++; continue; }
+    if (ch === "'") { inS = true; continue; }
+    if (ch === '"') { inD = true; continue; }
+    if (ch === "`") { inBack = true; continue; }
+    if (ch === "$") {
+      const m = /^\$[A-Za-z0-9_]*\$/.exec(sql.slice(i));
+      if (m) { dollar = m[0]; i += dollar.length - 1; continue; }
+    }
+    if (ch === ";") { push(i); segStart = i + 1; continue; }
+  }
+  push(sql.length);
+  return out;
+}
+
+// 解析剪貼簿的表格文字（TSV / 多行）為二維字串陣列，供資料表「區塊貼上」。
+// 去除尾端單一換行（避免多出一列空白）；單一純文字回傳 1×1。
+export function parseClipboardGrid(text: string): string[][] {
+  const t = text.replace(/\r\n/g, "\n").replace(/\n$/, "");
+  return t.split("\n").map((line) => line.split("\t"));
+}
+
+// 回傳游標位移所在的語句文字；游標落在語句之間的空白時取後一條。無可辨識語句回 null。
+export function statementAtOffset(sql: string, offset: number): string | null {
+  const spans = splitSqlStatementsWithRanges(sql);
+  if (spans.length === 0) return null;
+  for (const s of spans) {
+    if (offset >= s.from && offset <= s.to) return s.text;
+  }
+  const after = spans.find((s) => s.from >= offset);
+  return (after ?? spans[spans.length - 1]).text;
 }

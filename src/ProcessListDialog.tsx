@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { Activity } from "lucide-react";
 import { api, DbKind, QueryResult } from "./api";
-import { toast, uiConfirm, useEscToClose } from "./ui";
+import { toast, uiConfirm } from "./ui";
+import { Modal, Button } from "./ui/index";
 
 // 列出目前連線 / 工作階段（致敬 Navicat 的伺服器監控）。沿用既有 runQuery（清單）+ execDdl（終止），免後端改動。
 const LIST_SQL: Partial<Record<DbKind, string>> = {
@@ -16,7 +18,6 @@ export default function ProcessListDialog({ connId, kind, onClose }: {
   kind: DbKind;
   onClose: () => void;
 }) {
-  useEscToClose(onClose);
   const [res, setRes] = useState<QueryResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,31 +67,36 @@ export default function ProcessListDialog({ connId, kind, onClose }: {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[95]" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[920px] max-w-[96vw] h-[80vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
+    <Modal
+      onClose={onClose}
+      size="xl"
+      zClass="z-[95]"
+      className="h-[80vh]"
+      bodyClassName="overflow-auto"
+      icon={Activity}
+      title={
+        <div className="flex items-center gap-2 w-full">
           <span className="font-medium text-sm">處理程序 / 工作階段</span>
-          {res && <span className="text-xs text-white/40">{res.rows.length} 筆</span>}
-          <label className="ml-auto flex items-center gap-1.5 text-xs text-white/55">
+          {res && <span className="text-xs text-fg/40">{res.rows.length} 筆</span>}
+          <label className="ml-auto flex items-center gap-1.5 text-xs text-fg/55">
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             自動更新（3 秒）
           </label>
           <button type="button" onClick={() => refresh()} disabled={busy}
             className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">{busy ? "讀取中…" : "重新整理"}</button>
-          <button type="button" onClick={onClose} className="text-white/40 hover:text-white">✕</button>
         </div>
-
-        <div className="flex-1 overflow-auto">
-          {!sql ? (
-            <div className="text-white/40 text-sm p-5">此資料庫種類不支援工作階段檢視。</div>
+      }
+      footer={<Button variant="secondary" onClick={onClose}>關閉</Button>}
+    >
+      {!sql ? (
+            <div className="text-fg/40 text-sm p-5">此資料庫種類不支援工作階段檢視。</div>
           ) : err ? (
             <div className="text-red-300 text-sm p-5 mono whitespace-pre-wrap">{err}</div>
           ) : !res ? (
-            <div className="text-white/40 text-sm p-5">讀取中…</div>
+            <div className="text-fg/40 text-sm p-5">讀取中…</div>
           ) : (
             <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-[#10161e] text-white/45">
+              <thead className="sticky top-0 bg-inset text-fg/45">
                 <tr>
                   <th className="w-24 px-2 py-1.5" aria-label="操作" />
                   {res.columns.map((c) => <th key={c} className="text-left px-2 py-1.5 font-normal whitespace-nowrap">{c}</th>)}
@@ -98,7 +104,7 @@ export default function ProcessListDialog({ connId, kind, onClose }: {
               </thead>
               <tbody>
                 {res.rows.map((row, i) => (
-                  <tr key={i} className="border-t border-white/5 hover:bg-white/5">
+                  <tr key={i} className="border-t border-fg/5 hover:bg-fg/5">
                     <td className="px-2 py-1 text-center whitespace-nowrap">
                       <button type="button" onClick={() => kill(row, true)} title="取消目前查詢（保留連線）"
                         className="text-[11px] px-1.5 py-0.5 rounded text-amber-300 hover:bg-amber-500/15">取消</button>
@@ -106,8 +112,8 @@ export default function ProcessListDialog({ connId, kind, onClose }: {
                         className="text-[11px] px-1.5 py-0.5 rounded text-red-400 hover:bg-red-500/15">終止</button>
                     </td>
                     {row.map((v, j) => (
-                      <td key={j} className="px-2 py-1 mono text-white/80 max-w-[340px] truncate" title={v ?? "NULL"}>
-                        {v ?? <span className="text-white/30">NULL</span>}
+                      <td key={j} className="px-2 py-1 mono text-fg/80 max-w-[340px] truncate" title={v ?? "NULL"}>
+                        {v ?? <span className="text-fg/30">NULL</span>}
                       </td>
                     ))}
                   </tr>
@@ -115,13 +121,6 @@ export default function ProcessListDialog({ connId, kind, onClose }: {
               </tbody>
             </table>
           )}
-        </div>
-
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">關閉</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Folder, KeyRound, Circle } from "lucide-react";
 import { api } from "./api";
+import Icon from "./ui/Icon";
 
 const LIMIT = 10000;
 const SEP = ":";
@@ -134,21 +136,21 @@ export default function RedisKeyTree({ connId, database, nonce, onOpenKey, onCon
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* 工具列：MATCH 樣式 + 展開/收合 */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-[#10161e] border-b border-white/10 text-xs">
+      <div className="flex items-center gap-1 px-2 py-1 bg-inset border-b border-fg/10 text-xs">
         <input
           value={patternInput}
           onChange={(e) => setPatternInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") apply(); }}
           placeholder="MATCH 樣式，如 user:*"
-          className="w-48 bg-black/30 border border-white/10 rounded px-2 py-1 mono outline-none focus:border-blue-500"
+          className="w-48 bg-inset border border-fg/10 rounded px-2 py-1 mono outline-none focus:border-accent"
         />
-        <button onClick={apply} className="px-2 py-1 rounded hover:bg-white/10 text-white/60">套用</button>
-        <div className="w-px h-4 bg-white/10 mx-1" />
-        <button onClick={() => tree && setExpanded(new Set(allFolderPaths(tree)))}
-          className="px-2 py-1 rounded hover:bg-white/10 text-white/60">展開全部</button>
-        <button onClick={() => setExpanded(new Set())}
-          className="px-2 py-1 rounded hover:bg-white/10 text-white/60">收合全部</button>
-        <span className="ml-auto text-white/40">
+        <button type="button" onClick={apply} className="px-2 py-1 rounded hover:bg-fg/10 text-fg/60">套用</button>
+        <div className="w-px h-4 bg-fg/10 mx-1" />
+        <button type="button" onClick={() => tree && setExpanded(new Set(allFolderPaths(tree)))}
+          className="px-2 py-1 rounded hover:bg-fg/10 text-fg/60">展開全部</button>
+        <button type="button" onClick={() => setExpanded(new Set())}
+          className="px-2 py-1 rounded hover:bg-fg/10 text-fg/60">收合全部</button>
+        <span className="ml-auto text-fg/40">
           {loading ? "讀取中…" : keys ? `${keys.length} 個鍵${truncated ? `（已達 ${LIMIT} 上限）` : ""}` : ""}
         </span>
       </div>
@@ -161,7 +163,7 @@ export default function RedisKeyTree({ connId, database, nonce, onOpenKey, onCon
           </div>
         )}
         {keys && keys.length === 0 && !err && (
-          <div className="p-3 text-white/40 text-sm">（無符合的鍵）</div>
+          <div className="p-3 text-fg/40 text-sm">（無符合的鍵）</div>
         )}
         {rows.map((r, i) =>
           r.kind === "folder" ? (
@@ -169,10 +171,12 @@ export default function RedisKeyTree({ connId, database, nonce, onOpenKey, onCon
               key={`f:${r.path}`}
               onClick={() => toggle(r.path)}
               style={{ paddingLeft: 8 + r.depth * INDENT }}
-              className="flex items-center gap-1 pr-3 py-0.5 cursor-pointer hover:bg-white/5 text-sm select-none"
+              className="flex items-center gap-1 pr-3 py-0.5 cursor-pointer hover:bg-fg/5 text-sm select-none"
             >
-              <span className="text-white/30 text-[10px] w-3">{r.expanded ? "▼" : "▶"}</span>
-              <span className="text-amber-300/80">▤</span>
+              <span className="text-fg/30 w-3 inline-flex items-center justify-center">
+                <Icon icon={ChevronRight} size={12} className={r.expanded ? "transition-transform rotate-90" : "transition-transform"} />
+              </span>
+              <Icon icon={Folder} size={14} className="text-amber-300/80" />
               {r.selfKey != null ? (
                 <span
                   onClick={(e) => { e.stopPropagation(); onOpenKey(r.selfKey!); }}
@@ -181,10 +185,10 @@ export default function RedisKeyTree({ connId, database, nonce, onOpenKey, onCon
                   className="truncate text-blue-300 hover:underline"
                 >{r.seg}</span>
               ) : (
-                <span className="truncate text-white/80">{r.seg}</span>
+                <span className="truncate text-fg/80">{r.seg}</span>
               )}
-              <span className="text-[10px] text-white/30 ml-1">({r.count})</span>
-              {r.selfKey != null && <span className="text-[10px] text-blue-300/70 ml-0.5" title="此節點本身也是一個鍵">◆</span>}
+              <span className="text-[10px] text-fg/30 ml-1">({r.count})</span>
+              {r.selfKey != null && <Icon icon={KeyRound} size={12} className="text-blue-300/70 ml-0.5" title="此節點本身也是一個鍵" />}
             </div>
           ) : (
             <div
@@ -193,9 +197,9 @@ export default function RedisKeyTree({ connId, database, nonce, onOpenKey, onCon
               onContextMenu={(e) => { e.preventDefault(); onContextKey(r.key, e.clientX, e.clientY); }}
               title={r.key}
               style={{ paddingLeft: 8 + r.depth * INDENT + 16 }}
-              className="flex items-center gap-1.5 pr-3 py-0.5 cursor-pointer hover:bg-white/5 text-sm mono text-blue-300/90"
+              className="flex items-center gap-1.5 pr-3 py-0.5 cursor-pointer hover:bg-fg/5 text-sm mono text-blue-300/90"
             >
-              <span className="text-white/25 text-[10px]">◆</span>
+              <Icon icon={Circle} size={10} className="text-fg/25" />
               <span className="truncate">{r.seg}</span>
             </div>
           )

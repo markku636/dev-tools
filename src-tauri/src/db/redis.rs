@@ -1,9 +1,9 @@
 use redis::AsyncCommands;
 
 use crate::db::{
-    BigKey, CellEdit, ClientInfo, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver,
-    KeyDetail, KeyEdit, KeyPage, PagedData, PoolStatus, QueryResult, RedisKeys, RowDelete,
-    RowInsert, ServerInfoSection, SlowLogEntry, TableInfo,
+    finalize_hits, BigKey, CellEdit, ClientInfo, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver,
+    KeyDetail, KeyEdit, KeyPage, PagedData, PoolStatus, QueryResult, RedisKeys, RowDelete, RowInsert,
+    SearchHit, SearchOptions, ServerInfoSection, SlowLogEntry, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -626,6 +626,46 @@ impl DatabaseDriver for RedisDriver {
 
     fn pool_status(&self) -> PoolStatus {
         PoolStatus { size: 0, idle: 0, in_use: 0 }
+    }
+
+    async fn search_objects(&self, opts: &SearchOptions) -> AppResult<Vec<SearchHit>> {
+        // Redis 無 SQL 物件；以 SCAN MATCH 比對鍵名（object_type=key，glob 比對為大小寫敏感）。
+        if opts.term.is_empty() || !opts.match_names || !opts.wants_type("key") {
+            return Ok(vec![]);
+        }
+        let cap = opts.cap();
+        // 含 glob 字元（* ?）視為樣式原樣使用；否則以 *sub* 包夾成子字串比對。
+        let pattern = if opts.term.contains('*') || opts.term.contains('?') {
+            opts.term.clone()
+        } else {
+            format!("*{}*", opts.term)
+        };
+        let dbs: Vec<String> = match &opts.databases {
+            Some(list) if !list.is_empty() => list.clone(),
+            _ => (0..self.db_count).map(|i| i.to_string()).collect(),
+        };
+        let mut hits = Vec::new();
+        for db in dbs {
+            if hits.len() >= cap {
+                break;
+            }
+            let found = match self.scan_keys(&db, &pattern, cap).await {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
+            for key in found.keys {
+                hits.push(SearchHit {
+                    database: db.clone(),
+                    object_type: "key".into(),
+                    object_name: key,
+                    parent: None,
+                    matched_in: "name".into(),
+                    snippet: None,
+                    extra: None,
+                });
+            }
+        }
+        Ok(finalize_hits(hits, opts))
     }
 
     async fn key_detail(&self, database: &str, key: &str) -> AppResult<Option<KeyDetail>> {

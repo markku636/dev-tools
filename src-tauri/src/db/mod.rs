@@ -158,6 +158,34 @@ pub struct RoutineInfo {
     pub comment: Option<String>,
 }
 
+/// DDL 語法驗證結果（前端 SQL 編輯器「驗證」按鈕用）。
+/// - `ok`：未發現語法錯誤（略過時亦為 true，代表「不阻擋執行」）。
+/// - `validated`：伺服器是否實際送引擎驗證；false = 略過（如 MySQL 觸發器、無權限），原因見 `caveat`。
+/// - `message` / `line`：`ok=false` 時的引擎錯誤訊息與（可解析時的）行號。
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidationReport {
+    pub ok: bool,
+    pub validated: bool,
+    pub message: Option<String>,
+    pub line: Option<u32>,
+    pub caveat: Option<String>,
+}
+
+impl ValidationReport {
+    /// 驗證通過（引擎接受該語句）。
+    pub fn passed() -> Self {
+        Self { ok: true, validated: true, message: None, line: None, caveat: None }
+    }
+    /// 引擎回報語法錯誤。
+    pub fn failed(message: String, line: Option<u32>) -> Self {
+        Self { ok: false, validated: true, message: Some(message), line, caveat: None }
+    }
+    /// 無法安全驗證而略過（不阻擋執行；以 caveat 告知使用者原因）。
+    pub fn skipped(caveat: String) -> Self {
+        Self { ok: true, validated: false, message: None, line: None, caveat: Some(caveat) }
+    }
+}
+
 /// 欄位定義（「結構」分頁用）。
 #[derive(Debug, Clone, Serialize)]
 pub struct ColumnInfo {
@@ -428,6 +456,14 @@ pub(crate) fn fmt_bytes(b: i64) -> String {
     }
 }
 
+/// 從 sqlx 錯誤取出資料庫端訊息（去除 sqlx 外層包裝），供語法驗證回報。各 SQL driver 共用。
+pub(crate) fn sqlx_db_message(e: &sqlx::Error) -> String {
+    match e {
+        sqlx::Error::Database(db) => db.message().to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// 由 [from_table, from_col, to_table, to_col] 四欄的列建出關係清單與 FK 欄集合（各 SQL driver 共用）。
 pub(crate) fn collect_relations<R>(
     rows: &[R],
@@ -490,6 +526,233 @@ pub struct DataQuery {
     /// 多個篩選條件的連接方式：false = AND（預設）、true = OR。
     #[serde(default)]
     pub match_any: bool,
+}
+
+/// SQL Search（全資料庫物件搜尋，致敬 Red Gate SQL Search）的單筆命中結果。
+/// 不只比對名稱，也比對 view / procedure / function / trigger 的「定義內文」。
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchHit {
+    /// 命中所在的資料庫 / schema（MySQL=db、PG=schema、SQLite="main"、Mongo=db、Redis=db index）。
+    pub database: String,
+    /// 物件型別：table|view|column|index|procedure|function|trigger|foreign_key|collection|key。
+    pub object_type: String,
+    /// 物件名稱。
+    pub object_name: String,
+    /// 所屬資料表 / 集合（column / index / trigger / foreign_key 適用；其餘為 None）。
+    pub parent: Option<String>,
+    /// 命中位置：name|definition|comment。供前端標示「在哪裡找到」。
+    pub matched_in: String,
+    /// 定義內文命中時的前後文片段（供前端高亮）；其餘為 None。
+    pub snippet: Option<String>,
+    /// 補充資訊（如欄位資料型別、PG 函式引數簽章）；純顯示用。
+    pub extra: Option<String>,
+}
+
+/// SQL Search 選項（前端傳入；serde 欄位與 api.ts 對齊）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SearchOptions {
+    /// 搜尋字串（子字串比對）。
+    pub term: String,
+    /// 限定資料庫 / schema 清單；None / 空 → 全部（排除系統庫）。
+    #[serde(default)]
+    pub databases: Option<Vec<String>>,
+    /// 限定物件型別；None / 空 → 全部型別。
+    #[serde(default)]
+    pub types: Option<Vec<String>>,
+    /// 比對物件名稱。
+    #[serde(default)]
+    pub match_names: bool,
+    /// 比對定義內文（view / routine / trigger body）。
+    #[serde(default)]
+    pub match_definitions: bool,
+    /// 比對註解。
+    #[serde(default)]
+    pub match_comments: bool,
+    /// 區分大小寫。
+    #[serde(default)]
+    pub case_sensitive: bool,
+    /// 結果上限（每段查詢與整體共用）；None → 預設 500。
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+impl SearchOptions {
+    /// 整體與每段查詢的結果上限（夾在合理範圍）。
+    pub fn cap(&self) -> usize {
+        self.limit.unwrap_or(500).clamp(1, 5000)
+    }
+
+    /// 是否納入此物件型別（types 為 None / 空 → 全納）。
+    pub fn wants_type(&self, t: &str) -> bool {
+        match &self.types {
+            Some(v) if !v.is_empty() => v.iter().any(|x| x == t),
+            _ => true,
+        }
+    }
+
+    /// 文字是否含搜尋詞（依 case_sensitive；以原始 term 比對，不含 LIKE 跳脫）。
+    pub fn hit(&self, text: &str) -> bool {
+        if self.term.is_empty() {
+            return false;
+        }
+        if self.case_sensitive {
+            text.contains(self.term.as_str())
+        } else {
+            text.to_lowercase().contains(&self.term.to_lowercase())
+        }
+    }
+
+    /// 是否完全沒有任何比對範圍被啟用（前端理應至少開一項，後端防呆）。
+    pub fn no_scope(&self) -> bool {
+        !self.match_names && !self.match_definitions && !self.match_comments
+    }
+}
+
+/// 把使用者輸入轉成 LIKE 子字串樣式（前後加 `%`），並以反斜線跳脫 LIKE 萬用字元
+/// （`\` `%` `_`），使其字面比對。各 driver 的 SQL 需搭配對應的 `ESCAPE '\'`（PG / SQLite）
+/// 或 `ESCAPE '\\'`（MySQL 字串字面值）。
+pub(crate) fn like_contains(term: &str) -> String {
+    let mut s = String::with_capacity(term.len() + 2);
+    s.push('%');
+    for c in term.chars() {
+        if c == '\\' || c == '%' || c == '_' {
+            s.push('\\');
+        }
+        s.push(c);
+    }
+    s.push('%');
+    s
+}
+
+/// 由定義內文取命中處的前後文片段（供前端顯示與高亮）。
+/// 以 case 模式找出第一個命中位置，截取前後約 60 字的視窗，並把連續空白 / 換行壓成單一空白。
+pub(crate) fn make_snippet(text: &str, term: &str, case_sensitive: bool) -> Option<String> {
+    if term.is_empty() {
+        return None;
+    }
+    let hay = if case_sensitive { text.to_string() } else { text.to_lowercase() };
+    let needle = if case_sensitive { term.to_string() } else { term.to_lowercase() };
+    let byte_pos = hay.find(&needle)?;
+    let char_pos = hay[..byte_pos].chars().count();
+    let chars: Vec<char> = text.chars().collect();
+    const WIN: usize = 60;
+    let start = char_pos.saturating_sub(WIN);
+    let end = (char_pos + needle.chars().count() + WIN).min(chars.len());
+    let window: String = chars[start..end].iter().collect();
+    let collapsed = window.split_whitespace().collect::<Vec<_>>().join(" ");
+    let prefix = if start > 0 { "…" } else { "" };
+    let suffix = if end < chars.len() { "…" } else { "" };
+    Some(format!("{prefix}{collapsed}{suffix}"))
+}
+
+/// 由候選的 (名稱 / 定義 / 註解) 依 name → definition → comment 優先序判定命中位置與片段。
+/// 回 None 表示在啟用的比對範圍內均未命中（含 case-sensitive 精修後落空）。
+/// 各 driver 共用（自由函式而非閉包，方便在 tokio::join! 的多個並行區段中呼叫）。
+pub(crate) fn classify_match(
+    opts: &SearchOptions,
+    name: &str,
+    def: Option<&str>,
+    comment: Option<&str>,
+) -> Option<(&'static str, Option<String>)> {
+    if opts.match_names && opts.hit(name) {
+        return Some(("name", None));
+    }
+    if opts.match_definitions {
+        if let Some(d) = def {
+            if opts.hit(d) {
+                return Some(("definition", make_snippet(d, &opts.term, opts.case_sensitive)));
+            }
+        }
+    }
+    if opts.match_comments {
+        if let Some(c) = comment {
+            if !c.is_empty() && opts.hit(c) {
+                return Some(("comment", make_snippet(c, &opts.term, opts.case_sensitive)));
+            }
+        }
+    }
+    None
+}
+
+/// 物件型別的顯示排序權重（結果分組順序）。
+fn search_type_rank(t: &str) -> u8 {
+    match t {
+        "table" => 0,
+        "view" => 1,
+        "column" => 2,
+        "index" => 3,
+        "procedure" => 4,
+        "function" => 5,
+        "trigger" => 6,
+        "foreign_key" => 7,
+        "collection" => 8,
+        "key" => 9,
+        _ => 10,
+    }
+}
+
+/// matched_in 的優先序（去重時保留較具資訊的命中）。
+fn matched_in_rank(m: &str) -> u8 {
+    match m {
+        "name" => 0,
+        "definition" => 1,
+        "comment" => 2,
+        _ => 3,
+    }
+}
+
+/// 相關性權重（同型別內排序用，越小越相關）：
+/// 名稱完全符合 → 名稱開頭符合 → 名稱包含 → 註解命中 → 僅定義內文命中。
+fn relevance_rank(h: &SearchHit, opts: &SearchOptions) -> u8 {
+    if h.matched_in != "name" {
+        return if h.matched_in == "comment" { 3 } else { 4 };
+    }
+    let (name, term) = if opts.case_sensitive {
+        (h.object_name.clone(), opts.term.clone())
+    } else {
+        (h.object_name.to_lowercase(), opts.term.to_lowercase())
+    };
+    if name == term {
+        0
+    } else if name.starts_with(&term) {
+        1
+    } else {
+        2
+    }
+}
+
+/// 各 driver 收集完命中後的共用收尾：依 (型別, 資料庫, 所屬, 名稱) 去重（同物件保留
+/// 較高優先序的 matched_in），排序，並截斷到整體上限。
+pub(crate) fn finalize_hits(hits: Vec<SearchHit>, opts: &SearchOptions) -> Vec<SearchHit> {
+    use std::collections::HashMap;
+    let mut map: HashMap<(String, String, String, String), SearchHit> = HashMap::new();
+    for h in hits {
+        let key = (
+            h.object_type.clone(),
+            h.database.clone(),
+            h.parent.clone().unwrap_or_default(),
+            h.object_name.clone(),
+        );
+        match map.get(&key) {
+            Some(existing) if matched_in_rank(&existing.matched_in) <= matched_in_rank(&h.matched_in) => {}
+            _ => {
+                map.insert(key, h);
+            }
+        }
+    }
+    let mut out: Vec<SearchHit> = map.into_values().collect();
+    // 排序：先依型別分組（呼應前端分組顯示），同型別內依相關性（完全符合 > 開頭 > 含 > 註解 > 定義），
+    // 再以資料庫 / 所屬 / 名稱穩定排序。
+    out.sort_by(|a, b| {
+        search_type_rank(&a.object_type)
+            .cmp(&search_type_rank(&b.object_type))
+            .then_with(|| relevance_rank(a, opts).cmp(&relevance_rank(b, opts)))
+            .then_with(|| a.database.cmp(&b.database))
+            .then_with(|| a.parent.cmp(&b.parent))
+            .then_with(|| a.object_name.cmp(&b.object_name))
+    });
+    out.truncate(opts.cap());
+    out
 }
 
 /// 統一驅動介面。各資料庫實作此 trait，差異吸收在 driver 層。
@@ -628,10 +891,24 @@ pub trait DatabaseDriver: Send + Sync {
         Err(AppError::Unsupported("此資料庫不支援預存程序 / 觸發器".into()))
     }
 
+    /// 全資料庫物件搜尋（SQL Search）。比對名稱 / 定義內文 / 註解，跨所有資料庫 / schema。
+    /// 非關聯式預設回 Unsupported（Mongo / Redis 另以名稱層級覆寫）。
+    async fn search_objects(&self, _opts: &SearchOptions) -> AppResult<Vec<SearchHit>> {
+        Err(AppError::Unsupported("此資料庫不支援物件搜尋".into()))
+    }
+
     /// 執行 DDL（CREATE PROCEDURE / TRIGGER 等編譯語句）。以簡單查詢協定送出整段——
     /// MySQL 的 prepared 協定不支援 CREATE PROCEDURE，且內部 ; 不可被前端切句。SQL 專用。
     async fn exec_ddl(&self, _sql: &str) -> AppResult<()> {
         Err(AppError::Unsupported("此資料庫不支援此操作".into()))
+    }
+
+    /// 驗證 DDL 語法而不持久化變更。PG / SQLite 以交易回滾試行；MySQL 以暫存名稱試建後刪除
+    /// （觸發器 / 事件無法安全試建，回 skipped）。`database` 供 MySQL 試建時的 schema。
+    /// 預設（Mongo / Redis）回 Unsupported。回 Err 代表「無法執行驗證」（連線等問題）；
+    /// 語法錯誤本身是成功回傳的 `ValidationReport{ ok: false }`。
+    async fn validate_ddl(&self, _database: &str, _sql: &str) -> AppResult<ValidationReport> {
+        Err(AppError::Unsupported("此資料庫不支援語法驗證".into()))
     }
 
     /// 結構編輯（DDL：ALTER TABLE）。非關聯式預設 Unsupported。

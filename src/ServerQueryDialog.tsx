@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { Server } from "lucide-react";
 import { api, QueryResult } from "./api";
-import { useEscToClose } from "./ui";
+import { Modal, Button } from "./ui/index";
 
 // 通用唯讀結果檢視器：執行一段 SQL（如使用者 / 角色、伺服器變數）並以表格呈現，可重新整理。
 export default function ServerQueryDialog({ connId, title, sql, onClose }: {
@@ -9,7 +10,6 @@ export default function ServerQueryDialog({ connId, title, sql, onClose }: {
   sql: string;
   onClose: () => void;
 }) {
-  useEscToClose(onClose);
   const [res, setRes] = useState<QueryResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,47 +29,47 @@ export default function ServerQueryDialog({ connId, title, sql, onClose }: {
   useEffect(() => { void refresh(); }, [refresh]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[95]" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[860px] max-w-[96vw] h-[78vh] flex flex-col rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 flex items-center gap-2">
+    <Modal
+      onClose={onClose}
+      icon={Server}
+      size="xl"
+      zClass="z-[95]"
+      className="!w-[860px] max-w-[96vw] h-[78vh]"
+      bodyClassName="overflow-auto"
+      title={
+        <>
           <span className="font-medium text-sm">{title}</span>
-          {res && <span className="text-xs text-white/40">{res.rows.length} 筆</span>}
+          {res && <span className="text-xs text-fg/40 ml-2">{res.rows.length} 筆</span>}
           <button type="button" onClick={() => refresh()} disabled={busy}
             className="ml-auto text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40">{busy ? "讀取中…" : "重新整理"}</button>
-          <button type="button" onClick={onClose} className="text-white/40 hover:text-white">✕</button>
-        </div>
-        <div className="flex-1 overflow-auto">
-          {err ? (
-            <div className="text-red-300 text-sm p-5 mono whitespace-pre-wrap">{err}</div>
-          ) : !res ? (
-            <div className="text-white/40 text-sm p-5">讀取中…</div>
-          ) : res.rows.length === 0 ? (
-            <div className="text-white/40 text-sm p-5">（無資料）</div>
-          ) : (
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-[#10161e] text-white/45">
-                <tr>{res.columns.map((c) => <th key={c} className="text-left px-3 py-1.5 font-normal whitespace-nowrap">{c}</th>)}</tr>
-              </thead>
-              <tbody>
-                {res.rows.map((row, i) => (
-                  <tr key={i} className="border-t border-white/5 hover:bg-white/5">
-                    {row.map((v, j) => (
-                      <td key={j} className="px-3 py-1 mono text-white/80 max-w-[360px] truncate" title={v ?? "NULL"}>
-                        {v ?? <span className="text-white/30">NULL</span>}
-                      </td>
-                    ))}
-                  </tr>
+        </>
+      }
+      footer={<Button variant="secondary" onClick={onClose}>關閉</Button>}
+    >
+      {err ? (
+        <div className="text-red-300 text-sm p-5 mono whitespace-pre-wrap">{err}</div>
+      ) : !res ? (
+        <div className="text-fg/40 text-sm p-5">讀取中…</div>
+      ) : res.rows.length === 0 ? (
+        <div className="text-fg/40 text-sm p-5">（無資料）</div>
+      ) : (
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-inset text-fg/45">
+            <tr>{res.columns.map((c) => <th key={c} className="text-left px-3 py-1.5 font-normal whitespace-nowrap">{c}</th>)}</tr>
+          </thead>
+          <tbody>
+            {res.rows.map((row, i) => (
+              <tr key={i} className="border-t border-fg/5 hover:bg-fg/5">
+                {row.map((v, j) => (
+                  <td key={j} className="px-3 py-1 mono text-fg/80 max-w-[360px] truncate" title={v ?? "NULL"}>
+                    {v ?? <span className="text-fg/30">NULL</span>}
+                  </td>
                 ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">關閉</button>
-        </div>
-      </div>
-    </div>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
   );
 }

@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { Upload } from "lucide-react";
 import { api, DataQuery, ExportFormat } from "./api";
 import { pickSaveFile, toast } from "./ui";
+import { Modal, Button } from "./ui/index";
 
 const FORMATS: { v: ExportFormat; label: string; ext: string }[] = [
   { v: "csv", label: "CSV", ext: "csv" },
@@ -29,11 +31,11 @@ export default function ExportDialog({ connId, database, table, query, onClose }
   const isCsv = format === "csv" || format === "tsv";
 
   const run = async () => {
-    if (busy) return; // 防重入：另存對話框開啟期間 busy 仍為 false，避免重複觸發
-    const out = await pickSaveFile(`${table}.${meta.ext}`, [{ name: meta.label, extensions: [meta.ext] }]);
-    if (!out) return;
-    setBusy(true);
+    if (busy) return;
+    setBusy(true); // 點擊即進入載入狀態（涵蓋原生另存對話框開啟期間），同時作為防重入鎖
     try {
+      const out = await pickSaveFile(`${table}.${meta.ext}`, [{ name: meta.label, extensions: [meta.ext] }]);
+      if (!out) return; // 取消：finally 會還原 busy
       const res = await api.exportTable(connId, database, table, query, {
         format,
         include_header: includeHeader,
@@ -52,20 +54,25 @@ export default function ExportDialog({ connId, database, table, query, onClose }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[440px] rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 font-medium text-sm">
-          匯出資料 · <span className="mono text-white/60">{table}</span>
-        </div>
-        <div className="p-5 space-y-3">
-          <div>
-            <span className="text-xs text-white/50 mb-1 block">格式</span>
+    <Modal
+      onClose={onClose}
+      title={<>匯出資料 · <span className="mono text-fg/60">{table}</span></>}
+      icon={Upload}
+      size="sm"
+      zClass="z-50"
+      bodyClassName="p-5 space-y-3 overflow-auto"
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>取消</Button>
+        <Button variant="primary" loading={busy} onClick={run} disabled={busy}>選擇位置並匯出</Button>
+      </>}
+    >
+      <div>
+            <span className="text-xs text-fg/50 mb-1 block">格式</span>
             <div className="flex gap-2 flex-wrap">
               {FORMATS.map((f) => (
                 <button key={f.v} type="button" onClick={() => setFormat(f.v)}
                   className={`px-3 py-1 rounded text-sm border ${
-                    format === f.v ? "border-blue-500 bg-blue-500/15 text-blue-300" : "border-white/10 text-white/50"
+                    format === f.v ? "border-accent bg-accent/15 text-accent" : "border-fg/10 text-fg/50"
                   }`}>
                   {f.label}
                 </button>
@@ -89,7 +96,7 @@ export default function ExportDialog({ connId, database, table, query, onClose }
                 加 UTF-8 BOM（方便 Excel 開啟）
               </label>
               <label className="block">
-                <span className="text-xs text-white/50 mb-1 block">NULL 顯示為</span>
+                <span className="text-xs text-fg/50 mb-1 block">NULL 顯示為</span>
                 <input className={inputCls} value={nullText} onChange={(e) => setNullText(e.target.value)}
                   placeholder="（空白）" />
               </label>
@@ -98,25 +105,15 @@ export default function ExportDialog({ connId, database, table, query, onClose }
 
           {format === "sql" && (
             <label className="block">
-              <span className="text-xs text-white/50 mb-1 block">INSERT 目標表名</span>
+              <span className="text-xs text-fg/50 mb-1 block">INSERT 目標表名</span>
               <input className={inputCls} value={sqlTable} onChange={(e) => setSqlTable(e.target.value)} />
             </label>
           )}
-        </div>
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">取消</button>
-          <button type="button" onClick={run} disabled={busy}
-            className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50">
-            {busy ? "匯出中…" : "選擇位置並匯出"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
-const inputCls = "w-full bg-black/30 border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-500";
+const inputCls = "w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm outline-none focus:border-accent";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;

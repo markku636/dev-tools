@@ -3,9 +3,10 @@ use sqlx::{Column, MySqlPool, Row, TypeInfo, ValueRef};
 use std::time::Duration;
 
 use crate::db::{
-    collect_relations, filter_op_sql, fmt_bytes, op_needs_value, AlterOp, CellEdit, ColumnInfo, ColumnStats,
-    ConnectionConfig, DataQuery, DatabaseDriver, ErColumn, ErModel, ErTable, Filter, ForeignKeyInfo, IndexInfo,
-    PagedData, PoolStatus, QueryResult, RoutineInfo, RowDelete, RowInsert, Sort, SortDir, TableInfo,
+    classify_match, collect_relations, filter_op_sql, finalize_hits, fmt_bytes, like_contains, make_snippet,
+    op_needs_value, sqlx_db_message, AlterOp, CellEdit, ColumnInfo, ColumnStats, ConnectionConfig, DataQuery, DatabaseDriver,
+    ErColumn, ErModel, ErTable, Filter, ForeignKeyInfo, IndexInfo, PagedData, PoolStatus, QueryResult, RoutineInfo,
+    RowDelete, RowInsert, SearchHit, SearchOptions, Sort, SortDir, TableInfo, ValidationReport,
 };
 use crate::error::{AppError, AppResult};
 
@@ -23,6 +24,154 @@ pub struct MysqlDriver {
 
 /// MySQL 系統資料庫（不可刪除）。
 const MYSQL_SYSTEM_DBS: [&str; 4] = ["information_schema", "mysql", "performance_schema", "sys"];
+
+// ---- 語法驗證輔助：在 CREATE routine 中定位名稱，供「暫存名稱試建」改寫 ----
+
+fn is_mysql_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '$'
+}
+
+// 略過空白與 -- / * * / 註解，回傳新索引（索引為 char_indices 的位置）。
+fn mysql_skip_trivia(cs: &[(usize, char)], mut k: usize) -> usize {
+    let m = cs.len();
+    loop {
+        while k < m && cs[k].1.is_whitespace() {
+            k += 1;
+        }
+        if k + 1 < m && cs[k].1 == '-' && cs[k + 1].1 == '-' {
+            k += 2;
+            while k < m && cs[k].1 != '\n' {
+                k += 1;
+            }
+            continue;
+        }
+        if k + 1 < m && cs[k].1 == '/' && cs[k + 1].1 == '*' {
+            k += 2;
+            while k + 1 < m && !(cs[k].1 == '*' && cs[k + 1].1 == '/') {
+                k += 1;
+            }
+            k = (k + 2).min(m);
+            continue;
+        }
+        break;
+    }
+    k
+}
+
+// 略過一段引號 / 反引號（含加倍轉義）；呼叫前 cs[k] 須為引號字元。
+fn mysql_skip_quoted(cs: &[(usize, char)], mut k: usize) -> usize {
+    let m = cs.len();
+    let q = cs[k].1;
+    k += 1;
+    while k < m {
+        if cs[k].1 == q {
+            if k + 1 < m && cs[k + 1].1 == q {
+                k += 2;
+                continue;
+            }
+            k += 1;
+            break;
+        }
+        k += 1;
+    }
+    k
+}
+
+fn mysql_read_word(cs: &[(usize, char)], k: usize) -> (String, usize) {
+    let m = cs.len();
+    let mut e = k;
+    let mut w = String::new();
+    while e < m && is_mysql_word_char(cs[e].1) {
+        w.push(cs[e].1);
+        e += 1;
+    }
+    (w, e)
+}
+
+// 讀取一段識別字（反引號或裸字），回傳結束索引。
+fn mysql_read_ident(cs: &[(usize, char)], k: usize) -> Option<usize> {
+    if k >= cs.len() {
+        return None;
+    }
+    if cs[k].1 == '`' {
+        Some(mysql_skip_quoted(cs, k))
+    } else if is_mysql_word_char(cs[k].1) {
+        Some(mysql_read_word(cs, k).1)
+    } else {
+        None
+    }
+}
+
+/// 在 SQL 頂層（略過註解 / 字串 / 反引號、含可選 DEFINER 子句）定位 MySQL routine 的種類與
+/// 名稱位元組範圍。回傳 (kind, name_start_byte, name_end_byte)，kind ∈ procedure|function|trigger|event。
+fn locate_mysql_routine(sql: &str) -> Option<(String, usize, usize)> {
+    let cs: Vec<(usize, char)> = sql.char_indices().collect();
+    let m = cs.len();
+    let byte_at = |k: usize| if k < m { cs[k].0 } else { sql.len() };
+
+    let mut k = mysql_skip_trivia(&cs, 0);
+    // 可選的開頭 CREATE。
+    let (w0, e0) = mysql_read_word(&cs, k);
+    if w0.eq_ignore_ascii_case("create") {
+        k = mysql_skip_trivia(&cs, e0);
+    }
+
+    // 掃描 token，跳過 DEFINER=... 子句，直到遇到 routine 關鍵字（裸字比對，不含引號內字）。
+    let kind;
+    let mut guard = 0usize;
+    loop {
+        guard += 1;
+        if guard > 1_000_000 {
+            return None;
+        }
+        k = mysql_skip_trivia(&cs, k);
+        if k >= m {
+            return None;
+        }
+        let c = cs[k].1;
+        if c == '\'' || c == '"' || c == '`' {
+            k = mysql_skip_quoted(&cs, k);
+            continue;
+        }
+        if is_mysql_word_char(c) {
+            let (w, e) = mysql_read_word(&cs, k);
+            let lw = w.to_ascii_lowercase();
+            if matches!(lw.as_str(), "procedure" | "function" | "trigger" | "event") {
+                kind = lw;
+                k = e;
+                break;
+            }
+            k = e;
+            continue;
+        }
+        k += 1; // = @ ( ) , . 等 DEFINER 子句字元
+    }
+
+    // 名稱（可能 `db`.`name` / db.name）。
+    k = mysql_skip_trivia(&cs, k);
+    if k >= m {
+        return None;
+    }
+    let name_start = byte_at(k);
+    let mut end = mysql_read_ident(&cs, k)?;
+    let after = mysql_skip_trivia(&cs, end);
+    if after < m && cs[after].1 == '.' {
+        let third = mysql_skip_trivia(&cs, after + 1);
+        if let Some(e2) = mysql_read_ident(&cs, third) {
+            end = e2;
+        }
+    }
+    Some((kind, name_start, byte_at(end)))
+}
+
+/// 從 MySQL 錯誤訊息嘗試取出行號（訊息常以 "... at line N" 結尾）。
+fn parse_mysql_line(msg: &str) -> Option<u32> {
+    let lower = msg.to_ascii_lowercase();
+    let pos = lower.rfind("at line ")?;
+    let rest = &msg[pos + "at line ".len()..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
 
 #[async_trait::async_trait]
 impl DatabaseDriver for MysqlDriver {
@@ -491,6 +640,287 @@ impl DatabaseDriver for MysqlDriver {
         str_col(&row, def_idx).ok_or_else(|| AppError::Query("無法取得定義（可能權限不足）".into()))
     }
 
+    async fn search_objects(&self, opts: &SearchOptions) -> AppResult<Vec<SearchHit>> {
+        if opts.term.is_empty() || opts.no_scope() {
+            return Ok(vec![]);
+        }
+        let pattern = like_contains(&opts.term);
+        let limit = format!(" LIMIT {}", opts.cap());
+
+        // 各物件型別查詢彼此獨立，改以 tokio::join! 並行送出（共用連線池，最多 max_connections 條同時），
+        // 縮短大型 schema / 全庫搜尋延遲。停用的型別 / 比對範圍回空 Vec；命中分類共用 classify_match
+        // （name → definition → comment 並做 case-sensitive 精修）。
+
+        // 1. 資料表 / 視圖（名稱 + 註解）。
+        let tables = async {
+            let mut out: Vec<SearchHit> = Vec::new();
+            if opts.wants_type("table") || opts.wants_type("view") {
+                let mut cols: Vec<&str> = Vec::new();
+                if opts.match_names {
+                    cols.push("TABLE_NAME");
+                }
+                if opts.match_comments {
+                    cols.push("TABLE_COMMENT");
+                }
+                if !cols.is_empty() {
+                    let (sf, sb) = my_schema_filter("TABLE_SCHEMA", &opts.databases);
+                    let sql = format!(
+                        "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT \
+                         FROM information_schema.TABLES WHERE 1=1{sf} AND {}{limit}",
+                        my_like_or(&cols)
+                    );
+                    for r in self.run_search(&sql, &sb, &pattern, cols.len()).await? {
+                        let db = str_col(&r, 0).unwrap_or_default();
+                        let name = str_col(&r, 1).unwrap_or_default();
+                        let is_view = str_col(&r, 2).unwrap_or_default().eq_ignore_ascii_case("VIEW");
+                        let comment = str_col(&r, 3).unwrap_or_default();
+                        let otype = if is_view { "view" } else { "table" };
+                        if !opts.wants_type(otype) {
+                            continue;
+                        }
+                        let (m, snip) = match classify_match(opts, &name, None, Some(&comment)) {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        out.push(SearchHit {
+                            database: db,
+                            object_type: otype.into(),
+                            object_name: name,
+                            parent: None,
+                            matched_in: m.into(),
+                            snippet: snip,
+                            extra: None,
+                        });
+                    }
+                }
+            }
+            Ok::<_, AppError>(out)
+        };
+
+        // 2. 視圖定義內文。
+        let views_def = async {
+            let mut out: Vec<SearchHit> = Vec::new();
+            if opts.match_definitions && opts.wants_type("view") {
+                let (sf, sb) = my_schema_filter("TABLE_SCHEMA", &opts.databases);
+                let sql = format!(
+                    "SELECT TABLE_SCHEMA, TABLE_NAME, VIEW_DEFINITION \
+                     FROM information_schema.VIEWS WHERE 1=1{sf} AND VIEW_DEFINITION LIKE ? ESCAPE '\\\\'{limit}"
+                );
+                for r in self.run_search(&sql, &sb, &pattern, 1).await? {
+                    let def = str_col(&r, 2).unwrap_or_default();
+                    if !opts.hit(&def) {
+                        continue;
+                    }
+                    out.push(SearchHit {
+                        database: str_col(&r, 0).unwrap_or_default(),
+                        object_type: "view".into(),
+                        object_name: str_col(&r, 1).unwrap_or_default(),
+                        parent: None,
+                        matched_in: "definition".into(),
+                        snippet: make_snippet(&def, &opts.term, opts.case_sensitive),
+                        extra: None,
+                    });
+                }
+            }
+            Ok::<_, AppError>(out)
+        };
+
+        // 3. 欄位（名稱 + 註解；資料型別放 extra 純顯示）。
+        let columns = async {
+            let mut out: Vec<SearchHit> = Vec::new();
+            if opts.wants_type("column") {
+                let mut cols: Vec<&str> = Vec::new();
+                if opts.match_names {
+                    cols.push("COLUMN_NAME");
+                }
+                if opts.match_comments {
+                    cols.push("COLUMN_COMMENT");
+                }
+                if !cols.is_empty() {
+                    let (sf, sb) = my_schema_filter("TABLE_SCHEMA", &opts.databases);
+                    let sql = format!(
+                        "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, COLUMN_COMMENT \
+                         FROM information_schema.COLUMNS WHERE 1=1{sf} AND {}{limit}",
+                        my_like_or(&cols)
+                    );
+                    for r in self.run_search(&sql, &sb, &pattern, cols.len()).await? {
+                        let name = str_col(&r, 2).unwrap_or_default();
+                        let comment = str_col(&r, 4).unwrap_or_default();
+                        let (m, snip) = match classify_match(opts, &name, None, Some(&comment)) {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        let ctype = str_col(&r, 3).unwrap_or_default();
+                        out.push(SearchHit {
+                            database: str_col(&r, 0).unwrap_or_default(),
+                            object_type: "column".into(),
+                            object_name: name,
+                            parent: str_col(&r, 1),
+                            matched_in: m.into(),
+                            snippet: snip,
+                            extra: if ctype.is_empty() { None } else { Some(ctype) },
+                        });
+                    }
+                }
+            }
+            Ok::<_, AppError>(out)
+        };
+
+        // 4. 預存程序 / 函式（名稱 + 定義內文 + 註解）。
+        let routines = async {
+            let mut out: Vec<SearchHit> = Vec::new();
+            if opts.wants_type("procedure") || opts.wants_type("function") {
+                let mut cols: Vec<&str> = Vec::new();
+                if opts.match_names {
+                    cols.push("ROUTINE_NAME");
+                }
+                if opts.match_definitions {
+                    cols.push("ROUTINE_DEFINITION");
+                }
+                if opts.match_comments {
+                    cols.push("ROUTINE_COMMENT");
+                }
+                if !cols.is_empty() {
+                    let (sf, sb) = my_schema_filter("ROUTINE_SCHEMA", &opts.databases);
+                    let sql = format!(
+                        "SELECT ROUTINE_SCHEMA, ROUTINE_NAME, ROUTINE_TYPE, ROUTINE_DEFINITION, ROUTINE_COMMENT \
+                         FROM information_schema.ROUTINES WHERE 1=1{sf} AND {}{limit}",
+                        my_like_or(&cols)
+                    );
+                    for r in self.run_search(&sql, &sb, &pattern, cols.len()).await? {
+                        let rtype = str_col(&r, 2).unwrap_or_default().to_lowercase(); // procedure | function
+                        if !opts.wants_type(&rtype) {
+                            continue;
+                        }
+                        let name = str_col(&r, 1).unwrap_or_default();
+                        let def = str_col(&r, 3);
+                        let comment = str_col(&r, 4);
+                        let (m, snip) = match classify_match(opts, &name, def.as_deref(), comment.as_deref()) {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        out.push(SearchHit {
+                            database: str_col(&r, 0).unwrap_or_default(),
+                            object_type: rtype,
+                            object_name: name,
+                            parent: None,
+                            matched_in: m.into(),
+                            snippet: snip,
+                            extra: None,
+                        });
+                    }
+                }
+            }
+            Ok::<_, AppError>(out)
+        };
+
+        // 5. 觸發器（名稱 + 動作內文）。
+        let triggers = async {
+            let mut out: Vec<SearchHit> = Vec::new();
+            if opts.wants_type("trigger") {
+                let mut cols: Vec<&str> = Vec::new();
+                if opts.match_names {
+                    cols.push("TRIGGER_NAME");
+                }
+                if opts.match_definitions {
+                    cols.push("ACTION_STATEMENT");
+                }
+                if !cols.is_empty() {
+                    let (sf, sb) = my_schema_filter("TRIGGER_SCHEMA", &opts.databases);
+                    let sql = format!(
+                        "SELECT TRIGGER_SCHEMA, TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_STATEMENT \
+                         FROM information_schema.TRIGGERS WHERE 1=1{sf} AND {}{limit}",
+                        my_like_or(&cols)
+                    );
+                    for r in self.run_search(&sql, &sb, &pattern, cols.len()).await? {
+                        let name = str_col(&r, 1).unwrap_or_default();
+                        let def = str_col(&r, 3);
+                        let (m, snip) = match classify_match(opts, &name, def.as_deref(), None) {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        out.push(SearchHit {
+                            database: str_col(&r, 0).unwrap_or_default(),
+                            object_type: "trigger".into(),
+                            object_name: name,
+                            parent: str_col(&r, 2),
+                            matched_in: m.into(),
+                            snippet: snip,
+                            extra: None,
+                        });
+                    }
+                }
+            }
+            Ok::<_, AppError>(out)
+        };
+
+        // 6. 索引（僅名稱）。
+        let indexes = async {
+            let mut out: Vec<SearchHit> = Vec::new();
+            if opts.wants_type("index") && opts.match_names {
+                let (sf, sb) = my_schema_filter("TABLE_SCHEMA", &opts.databases);
+                let sql = format!(
+                    "SELECT DISTINCT TABLE_SCHEMA, TABLE_NAME, INDEX_NAME \
+                     FROM information_schema.STATISTICS WHERE 1=1{sf} AND INDEX_NAME LIKE ? ESCAPE '\\\\'{limit}"
+                );
+                for r in self.run_search(&sql, &sb, &pattern, 1).await? {
+                    let name = str_col(&r, 2).unwrap_or_default();
+                    if !opts.hit(&name) {
+                        continue;
+                    }
+                    out.push(SearchHit {
+                        database: str_col(&r, 0).unwrap_or_default(),
+                        object_type: "index".into(),
+                        object_name: name,
+                        parent: str_col(&r, 1),
+                        matched_in: "name".into(),
+                        snippet: None,
+                        extra: None,
+                    });
+                }
+            }
+            Ok::<_, AppError>(out)
+        };
+
+        // 7. 外鍵（僅名稱）。
+        let fks = async {
+            let mut out: Vec<SearchHit> = Vec::new();
+            if opts.wants_type("foreign_key") && opts.match_names {
+                let (sf, sb) = my_schema_filter("TABLE_SCHEMA", &opts.databases);
+                let sql = format!(
+                    "SELECT DISTINCT TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME \
+                     FROM information_schema.KEY_COLUMN_USAGE WHERE 1=1{sf} AND REFERENCED_TABLE_NAME IS NOT NULL \
+                     AND CONSTRAINT_NAME LIKE ? ESCAPE '\\\\'{limit}"
+                );
+                for r in self.run_search(&sql, &sb, &pattern, 1).await? {
+                    let name = str_col(&r, 2).unwrap_or_default();
+                    if !opts.hit(&name) {
+                        continue;
+                    }
+                    out.push(SearchHit {
+                        database: str_col(&r, 0).unwrap_or_default(),
+                        object_type: "foreign_key".into(),
+                        object_name: name,
+                        parent: str_col(&r, 1),
+                        matched_in: "name".into(),
+                        snippet: None,
+                        extra: None,
+                    });
+                }
+            }
+            Ok::<_, AppError>(out)
+        };
+
+        // 並行送出全部區段查詢（tokio::join! 在同一 task 內並行 poll，無需 Send）。
+        let (r1, r2, r3, r4, r5, r6, r7) =
+            tokio::join!(tables, views_def, columns, routines, triggers, indexes, fks);
+        let mut hits: Vec<SearchHit> = Vec::new();
+        for r in [r1, r2, r3, r4, r5, r6, r7] {
+            hits.extend(r?);
+        }
+        Ok(finalize_hits(hits, opts))
+    }
+
     async fn exec_ddl(&self, sql: &str) -> AppResult<()> {
         // 簡單查詢協定（COM_QUERY）：支援 CREATE PROCEDURE / TRIGGER（prepared 協定不支援）。
         use sqlx::Executor;
@@ -499,6 +929,94 @@ impl DatabaseDriver for MysqlDriver {
             .await
             .map(|_| ())
             .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn validate_ddl(&self, database: &str, sql: &str) -> AppResult<ValidationReport> {
+        // MySQL 的 DDL 會隱式 commit，無法用交易回滾驗證。對 procedure/function 改用
+        // 「暫存名稱試建 → 立即刪除」（CREATE 時即檢查程序體語法）；trigger/event 會掛載真實
+        // 資料表 / 排程，無法安全試建，略過伺服器驗證（仍有前端結構檢查）。
+        use sqlx::Executor;
+
+        let (rtype, ns, ne) = match locate_mysql_routine(sql) {
+            Some(t) => t,
+            None => {
+                return Ok(ValidationReport::skipped(
+                    "無法辨識的 MySQL DDL，已略過伺服器驗證（僅前端結構檢查）。".into(),
+                ))
+            }
+        };
+        let kw = match rtype.as_str() {
+            "procedure" => "PROCEDURE",
+            "function" => "FUNCTION",
+            "trigger" => {
+                return Ok(ValidationReport::skipped(
+                    "MySQL 觸發器需掛載於真實資料表，無法安全試建驗證；已略過伺服器驗證（僅前端結構檢查）。".into(),
+                ))
+            }
+            "event" => {
+                return Ok(ValidationReport::skipped(
+                    "MySQL 事件無法安全試建驗證；已略過伺服器驗證（僅前端結構檢查）。".into(),
+                ))
+            }
+            _ => return Ok(ValidationReport::skipped("未知的 MySQL routine 類型，已略過伺服器驗證。".into())),
+        };
+
+        // 試建用 schema：優先前端帶入的 database，否則連線預設庫。
+        let schema = if database.is_empty() {
+            self.default_db.clone().unwrap_or_default()
+        } else {
+            database.to_string()
+        };
+        if schema.is_empty() {
+            return Ok(ValidationReport::skipped(
+                "未指定資料庫，MySQL 無法試建驗證；已略過伺服器驗證（僅前端結構檢查）。".into(),
+            ));
+        }
+
+        // 暫存名稱（nanos 後綴避免碰撞）；把原 SQL 的名稱位置改寫成 `schema`.`temp`。
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let temp_ref = format!("`{}`.`__atkit_validate_{suffix}`", schema.replace('`', "``"));
+        let temp_sql = format!("{}{}{}", &sql[..ns], temp_ref, &sql[ne..]);
+
+        // 專屬連線執行，避免 session 狀態外洩到 pool 其他使用者。
+        let mut conn = self.pool.acquire().await.map_err(|e| AppError::Query(e.to_string()))?;
+        let res = (&mut *conn).execute(temp_sql.as_str()).await;
+        // 不論成敗都嘗試刪除暫存 routine（成功時它會短暫存在）。
+        let _ = (&mut *conn).execute(format!("DROP {kw} IF EXISTS {temp_ref}").as_str()).await;
+        drop(conn);
+
+        match res {
+            Ok(_) => Ok(ValidationReport::passed()),
+            Err(e) => {
+                if let sqlx::Error::Database(db) = &e {
+                    if let Some(my) = db.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>() {
+                        match my.number() {
+                            // 權限不足（無 CREATE ROUTINE / DB 存取）：非語法問題，略過。
+                            1142 | 1044 | 1045 | 1370 => {
+                                return Ok(ValidationReport::skipped(
+                                    "目前帳號缺少建立 routine 的權限，無法在伺服器驗證（僅前端結構檢查）。".into(),
+                                ))
+                            }
+                            // 函式 binlog 安全限制：非語法問題，略過。
+                            1418 => {
+                                return Ok(ValidationReport::skipped(
+                                    "函式需宣告 DETERMINISTIC / READS SQL DATA（或具備權限）才能試建，已略過伺服器驗證。".into(),
+                                ))
+                            }
+                            _ => {
+                                let msg = my.message().to_string();
+                                let line = parse_mysql_line(&msg);
+                                return Ok(ValidationReport::failed(msg, line));
+                            }
+                        }
+                    }
+                }
+                Ok(ValidationReport::failed(sqlx_db_message(&e), None))
+            }
+        }
     }
 
     async fn list_foreign_keys(&self, database: &str, table: &str) -> AppResult<Vec<ForeignKeyInfo>> {
@@ -720,6 +1238,27 @@ impl DatabaseDriver for MysqlDriver {
 }
 
 impl MysqlDriver {
+    /// SQL Search 共用：執行一段已組好的搜尋查詢。
+    /// 綁定順序為「schema 過濾值」在前、LIKE 樣式（重複 like_count 次）在後，對應 SQL 中 `?` 的出現順序。
+    async fn run_search(
+        &self,
+        sql: &str,
+        schema_binds: &[String],
+        pattern: &str,
+        like_count: usize,
+    ) -> AppResult<Vec<MySqlRow>> {
+        let mut q = sqlx::query(sql);
+        for b in schema_binds {
+            q = q.bind(b.clone());
+        }
+        for _ in 0..like_count {
+            q = q.bind(pattern);
+        }
+        q.fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Query(e.to_string()))
+    }
+
     /// 取得表的主鍵欄位（依序）。無主鍵則回空。
     async fn primary_key(&self, database: &str, table: &str) -> AppResult<Vec<String>> {
         let sql = "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE \
@@ -739,6 +1278,28 @@ impl MysqlDriver {
 /// 以反引號包裹識別字，並轉義內部反引號，防止 SQL 注入。
 fn quote_ident(ident: &str) -> String {
     format!("`{}`", ident.replace('`', "``"))
+}
+
+/// SQL Search：建構 information_schema 的 schema 過濾子句與綁定值。
+/// 指定 databases → `AND {col} IN (?, …)`（值另以參數綁定）；否則排除系統庫。
+fn my_schema_filter(col: &str, dbs: &Option<Vec<String>>) -> (String, Vec<String>) {
+    match dbs {
+        Some(list) if !list.is_empty() => {
+            let ph = vec!["?"; list.len()].join(", ");
+            (format!(" AND {col} IN ({ph})"), list.clone())
+        }
+        _ => (
+            format!(" AND {col} NOT IN ('mysql','sys','information_schema','performance_schema')"),
+            Vec::new(),
+        ),
+    }
+}
+
+/// SQL Search：由欄位清單組 LIKE-OR 片段（case-insensitive ci collation）。
+/// MySQL 字串字面值中的單一反斜線需寫成 `'\\'`，故 ESCAPE 子句為 `ESCAPE '\\'`。
+fn my_like_or(cols: &[&str]) -> String {
+    let parts: Vec<String> = cols.iter().map(|c| format!("{c} LIKE ? ESCAPE '\\\\'")).collect();
+    format!("({})", parts.join(" OR "))
 }
 
 /// 穩健讀取字串欄位：先試 String，失敗則以 bytes 解碼。

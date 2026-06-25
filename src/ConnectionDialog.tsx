@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, ConnectionConfig, DbKind, KIND_META, SshAuthMethod } from "./api";
 import { pickOpenFile } from "./ui";
+import { Modal, Field, Input, Button, Segmented } from "./ui/index";
+import { Plug, FolderOpen } from "lucide-react";
 
 interface Props {
   onClose: () => void;
@@ -29,12 +31,10 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
   const [sshKeyPath, setSshKeyPath] = useState(initial?.ssh_private_key_path ?? "");
   const [sshPassphrase, setSshPassphrase] = useState("");
 
-  // Esc 關閉對話框。
+  // 任一連線欄位變動就清掉上次測試結果，避免「連線成功」殘留成誤導的假成功訊號（改了 host 卻仍顯示舊成功）。
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    setMsg(null);
+  }, [kind, host, port, username, password, database, sshEnabled, sshHost, sshPort, sshUsername, sshAuthMethod, sshPassword, sshKeyPath, sshPassphrase]);
 
   const build = (): ConnectionConfig => ({
     id: initial?.id ?? crypto.randomUUID(),
@@ -61,8 +61,9 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
   });
 
   const onKindChange = (k: DbKind) => {
+    // 僅在使用者尚未自訂埠（仍等於前一個 kind 的預設埠）時，才覆寫為新 kind 的預設埠
+    setPort((prev) => (prev === KIND_META[kind].defaultPort ? KIND_META[k].defaultPort : prev));
     setKind(k);
-    setPort(KIND_META[k].defaultPort);
   };
 
   const handleTest = async () => {
@@ -84,187 +85,169 @@ export default function ConnectionDialog({ onClose, onSaved, initial }: Props) {
   const fileBased = KIND_META[kind].fileBased;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-[#1a212b] w-[460px] rounded-lg border border-white/10 shadow-2xl">
-        <div className="px-5 py-3 border-b border-white/10 font-medium">{editing ? "編輯連線" : "新增連線"}</div>
-        <div className="p-5 space-y-3">
+    <Modal
+      onClose={onClose}
+      title={editing ? "編輯連線" : "新增連線"}
+      icon={Plug}
+      size="md"
+      zClass="z-50"
+      bodyClassName="p-5 space-y-3 overflow-auto"
+      footer={
+        <>
+          <Button variant="secondary" className="mr-auto" loading={testing} onClick={handleTest}>
+            測試連線
+          </Button>
+          <Button variant="secondary" onClick={onClose}>取消</Button>
+          <Button variant="primary" onClick={handleSave}>儲存</Button>
+        </>
+      }
+    >
+      <div className="flex gap-2">
+        {(Object.keys(KIND_META) as DbKind[]).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => onKindChange(k)}
+            className="flex-1 h-8 rounded text-sm border transition-colors"
+            style={{
+              borderColor: kind === k ? KIND_META[k].color : "rgb(var(--c-fg) / 0.12)",
+              background: kind === k ? KIND_META[k].color + "22" : "transparent",
+              color: kind === k ? KIND_META[k].color : "rgb(var(--c-fg) / 0.55)",
+            }}
+          >
+            {KIND_META[k].label}
+          </button>
+        ))}
+      </div>
+
+      <Field label="名稱">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="選填" />
+      </Field>
+
+      {fileBased ? (
+        <Field label="資料庫檔案路徑">
           <div className="flex gap-2">
-            {(Object.keys(KIND_META) as DbKind[]).map((k) => (
-              <button
-                key={k}
-                onClick={() => onKindChange(k)}
-                className="flex-1 py-1.5 rounded text-sm border transition"
-                style={{
-                  borderColor: kind === k ? KIND_META[k].color : "rgba(255,255,255,0.1)",
-                  background: kind === k ? KIND_META[k].color + "22" : "transparent",
-                  color: kind === k ? KIND_META[k].color : "#aaa",
-                }}
-              >
-                {KIND_META[k].label}
-              </button>
-            ))}
+            <Input
+              value={database}
+              onChange={(e) => setDatabase(e.target.value)}
+              placeholder="例如 C:\\data\\app.db（留空則用記憶體資料庫）"
+            />
+            <BrowseButton
+              onPick={async () => {
+                const p = await pickOpenFile([{ name: "SQLite", extensions: ["db", "sqlite", "sqlite3"] }]);
+                if (p) setDatabase(p);
+              }}
+            />
           </div>
-
-          <Field label="名稱">
-            <input className={input} value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="選填" />
-          </Field>
-
-          {fileBased ? (
-            // SQLite：檔案路徑
-            <Field label="資料庫檔案路徑">
-              <div className="flex gap-2">
-                <input className={input} value={database}
-                  onChange={(e) => setDatabase(e.target.value)}
-                  placeholder="例如 C:\\data\\app.db（留空則用記憶體資料庫）" />
-                <BrowseButton onPick={async () => {
-                  const p = await pickOpenFile([{ name: "SQLite", extensions: ["db", "sqlite", "sqlite3"] }]);
-                  if (p) setDatabase(p);
-                }} />
-              </div>
+        </Field>
+      ) : (
+        <>
+          <div className="flex gap-3">
+            <Field label="主機" className="flex-1">
+              <Input value={host} onChange={(e) => setHost(e.target.value)} />
             </Field>
-          ) : (
+            <Field label="埠" className="w-24">
+              <Input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} />
+            </Field>
+          </div>
+          <div className="flex gap-3">
+            <Field label="使用者" className="flex-1">
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+            </Field>
+            <Field label="密碼" className="flex-1">
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={editing ? "留空＝不變更" : ""}
+              />
+            </Field>
+          </div>
+          <Field label="資料庫（選填）">
+            <Input value={database} onChange={(e) => setDatabase(e.target.value)} />
+          </Field>
+        </>
+      )}
+
+      {!fileBased && (
+        <div className="border-t border-fg/10 pt-3 space-y-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <input type="checkbox" checked={sshEnabled} onChange={(e) => setSshEnabled(e.target.checked)} />
+            <span>透過 SSH Tunnel 連線</span>
+          </label>
+          {sshEnabled && (
             <>
               <div className="flex gap-3">
-                <Field label="主機" className="flex-1">
-                  <input className={input} value={host} onChange={(e) => setHost(e.target.value)} />
+                <Field label="SSH 主機" className="flex-1">
+                  <Input value={sshHost} onChange={(e) => setSshHost(e.target.value)} />
                 </Field>
-                <Field label="埠" className="w-24">
-                  <input className={input} type="number" value={port}
-                    onChange={(e) => setPort(Number(e.target.value))} />
-                </Field>
-              </div>
-              <div className="flex gap-3">
-                <Field label="使用者" className="flex-1">
-                  <input className={input} value={username}
-                    onChange={(e) => setUsername(e.target.value)} />
-                </Field>
-                <Field label="密碼" className="flex-1">
-                  <input className={input} type="password" value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={editing ? "留空＝不變更" : ""} />
+                <Field label="SSH 埠" className="w-24">
+                  <Input type="number" value={sshPort} onChange={(e) => setSshPort(Number(e.target.value))} />
                 </Field>
               </div>
-              <Field label="資料庫（選填）">
-                <input className={input} value={database}
-                  onChange={(e) => setDatabase(e.target.value)} />
+              <Field label="SSH 使用者">
+                <Input value={sshUsername} onChange={(e) => setSshUsername(e.target.value)} />
               </Field>
-            </>
-          )}
-
-          {!fileBased && (
-            <div className="border-t border-white/10 pt-3 space-y-3">
-              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                <input type="checkbox" checked={sshEnabled}
-                  onChange={(e) => setSshEnabled(e.target.checked)} />
-                <span>透過 SSH Tunnel 連線</span>
-              </label>
-              {sshEnabled && (
+              <Segmented
+                full
+                ariaLabel="SSH 認證方式"
+                value={sshAuthMethod}
+                onChange={setSshAuthMethod}
+                options={[
+                  { value: "password", label: "密碼認證" },
+                  { value: "key", label: "私鑰認證" },
+                ]}
+              />
+              {sshAuthMethod === "password" ? (
+                <Field label="SSH 密碼">
+                  <Input
+                    type="password"
+                    value={sshPassword}
+                    onChange={(e) => setSshPassword(e.target.value)}
+                    placeholder={editing ? "留空＝不變更" : ""}
+                  />
+                </Field>
+              ) : (
                 <>
-                  <div className="flex gap-3">
-                    <Field label="SSH 主機" className="flex-1">
-                      <input className={input} value={sshHost}
-                        onChange={(e) => setSshHost(e.target.value)} />
-                    </Field>
-                    <Field label="SSH 埠" className="w-24">
-                      <input className={input} type="number" value={sshPort}
-                        onChange={(e) => setSshPort(Number(e.target.value))} />
-                    </Field>
-                  </div>
-                  <Field label="SSH 使用者">
-                    <input className={input} value={sshUsername}
-                      onChange={(e) => setSshUsername(e.target.value)} />
+                  <Field label="私鑰檔路徑">
+                    <div className="flex gap-2">
+                      <Input
+                        value={sshKeyPath}
+                        onChange={(e) => setSshKeyPath(e.target.value)}
+                        placeholder="例如 C:\\Users\\me\\.ssh\\id_ed25519"
+                      />
+                      <BrowseButton
+                        onPick={async () => {
+                          const p = await pickOpenFile();
+                          if (p) setSshKeyPath(p);
+                        }}
+                      />
+                    </div>
                   </Field>
-                  <div className="flex gap-2">
-                    {(["password", "key"] as SshAuthMethod[]).map((m) => (
-                      <button key={m} type="button" onClick={() => setSshAuthMethod(m)}
-                        className="flex-1 py-1 rounded text-sm border"
-                        style={{
-                          borderColor: sshAuthMethod === m ? "#3b82f6" : "rgba(255,255,255,0.1)",
-                          background: sshAuthMethod === m ? "#3b82f622" : "transparent",
-                          color: sshAuthMethod === m ? "#3b82f6" : "#aaa",
-                        }}>
-                        {m === "password" ? "密碼認證" : "私鑰認證"}
-                      </button>
-                    ))}
-                  </div>
-                  {sshAuthMethod === "password" ? (
-                    <Field label="SSH 密碼">
-                      <input className={input} type="password" value={sshPassword}
-                        onChange={(e) => setSshPassword(e.target.value)}
-                        placeholder={editing ? "留空＝不變更" : ""} />
-                    </Field>
-                  ) : (
-                    <>
-                      <Field label="私鑰檔路徑">
-                        <div className="flex gap-2">
-                          <input className={input} value={sshKeyPath}
-                            onChange={(e) => setSshKeyPath(e.target.value)}
-                            placeholder="例如 C:\\Users\\me\\.ssh\\id_ed25519" />
-                          <BrowseButton onPick={async () => {
-                            const p = await pickOpenFile();
-                            if (p) setSshKeyPath(p);
-                          }} />
-                        </div>
-                      </Field>
-                      <Field label="私鑰密語（選填）">
-                        <input className={input} type="password" value={sshPassphrase}
-                          onChange={(e) => setSshPassphrase(e.target.value)}
-                          placeholder={editing ? "留空＝不變更" : ""} />
-                      </Field>
-                    </>
-                  )}
+                  <Field label="私鑰密語（選填）">
+                    <Input
+                      type="password"
+                      value={sshPassphrase}
+                      onChange={(e) => setSshPassphrase(e.target.value)}
+                      placeholder={editing ? "留空＝不變更" : ""}
+                    />
+                  </Field>
                 </>
               )}
-            </div>
-          )}
-
-          {msg && (
-            <div className={`text-sm ${msg.ok ? "text-green-400" : "text-red-400"}`}>
-              {msg.text}
-            </div>
+            </>
           )}
         </div>
-        <div className="px-5 py-3 border-t border-white/10 flex justify-between">
-          <button onClick={handleTest} disabled={testing}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5 disabled:opacity-50">
-            {testing ? "測試中…" : "測試連線"}
-          </button>
-          <div className="flex gap-2">
-            <button onClick={onClose}
-              className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">
-              取消
-            </button>
-            <button onClick={handleSave}
-              className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500">
-              儲存
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+      )}
 
-const input =
-  "w-full bg-black/30 border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-500";
-
-function Field({ label, children, className = "" }: {
-  label: string; children: React.ReactNode; className?: string;
-}) {
-  return (
-    <label className={`block ${className}`}>
-      <span className="text-xs text-white/50 mb-1 block">{label}</span>
-      {children}
-    </label>
+      {msg && <div className={`text-sm ${msg.ok ? "text-success" : "text-danger"}`}>{msg.text}</div>}
+    </Modal>
   );
 }
 
 function BrowseButton({ onPick }: { onPick: () => void }) {
   return (
-    <button type="button" onClick={onPick} title="瀏覽…"
-      className="shrink-0 px-3 rounded border border-white/15 hover:bg-white/5 text-sm">
-      瀏覽…
-    </button>
+    <Button variant="secondary" icon={FolderOpen} onClick={onPick} title="瀏覽…" className="shrink-0">
+      瀏覽
+    </Button>
   );
 }

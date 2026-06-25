@@ -11,7 +11,7 @@ use crate::db::sqlite::SqliteDriver;
 use crate::db::{
     AlterOp, CellEdit, ColumnInfo, ColumnStats, ConnectionConfig, DataQuery, DatabaseDriver, DbKind,
     ErModel, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, PagedData, PoolStatus, QueryResult, RedisKeys,
-    RoutineInfo, RowDelete, RowInsert, ServerInfoSection, TableInfo,
+    RoutineInfo, RowDelete, RowInsert, SearchHit, SearchOptions, ServerInfoSection, TableInfo, ValidationReport,
 };
 use crate::error::{AppError, AppResult};
 use crate::ssh::TunnelGuard;
@@ -244,6 +244,15 @@ impl Active {
             Active::Redis(d) => d.routine_definition(database, name, routine_type).await,
         }
     }
+    async fn search_objects(&self, opts: &SearchOptions) -> AppResult<Vec<SearchHit>> {
+        match self {
+            Active::Mysql(d) => d.search_objects(opts).await,
+            Active::Postgres(d) => d.search_objects(opts).await,
+            Active::Sqlite(d) => d.search_objects(opts).await,
+            Active::Mongo(d) => d.search_objects(opts).await,
+            Active::Redis(d) => d.search_objects(opts).await,
+        }
+    }
     async fn exec_ddl(&self, sql: &str) -> AppResult<()> {
         match self {
             Active::Mysql(d) => d.exec_ddl(sql).await,
@@ -251,6 +260,15 @@ impl Active {
             Active::Sqlite(d) => d.exec_ddl(sql).await,
             Active::Mongo(d) => d.exec_ddl(sql).await,
             Active::Redis(d) => d.exec_ddl(sql).await,
+        }
+    }
+    async fn validate_ddl(&self, database: &str, sql: &str) -> AppResult<ValidationReport> {
+        match self {
+            Active::Mysql(d) => d.validate_ddl(database, sql).await,
+            Active::Postgres(d) => d.validate_ddl(database, sql).await,
+            Active::Sqlite(d) => d.validate_ddl(database, sql).await,
+            Active::Mongo(d) => d.validate_ddl(database, sql).await,
+            Active::Redis(d) => d.validate_ddl(database, sql).await,
         }
     }
     async fn alter_table(&self, database: &str, table: &str, op: &AlterOp) -> AppResult<()> {
@@ -604,8 +622,16 @@ impl ConnectionManager {
         self.get(id)?.active.routine_definition(database, name, routine_type).await
     }
 
+    pub async fn search_objects(&self, id: &str, opts: &SearchOptions) -> AppResult<Vec<SearchHit>> {
+        self.get(id)?.active.search_objects(opts).await
+    }
+
     pub async fn exec_ddl(&self, id: &str, sql: &str) -> AppResult<()> {
         self.get(id)?.active.exec_ddl(sql).await
+    }
+
+    pub async fn validate_ddl(&self, id: &str, database: &str, sql: &str) -> AppResult<ValidationReport> {
+        self.get(id)?.active.validate_ddl(database, sql).await
     }
 
     pub async fn alter_table(

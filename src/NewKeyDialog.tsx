@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { KeyRound } from "lucide-react";
 import { api } from "./api";
 import { toast } from "./ui";
+import { Modal, Button } from "./ui/index";
 
 type RType = "string" | "list" | "set" | "hash" | "zset";
 
@@ -64,25 +66,32 @@ export default function NewKeyDialog({ connId, database, onClose, onCreated }: {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]" onClick={onClose}>
-      <div className="bg-[#1a212b] w-[420px] max-w-[92vw] rounded-lg border border-white/10 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-white/10 font-medium text-sm">新增鍵（DB {database}）</div>
-        <div className="p-5 space-y-3">
-          {err && <div className="text-red-400 text-sm mono break-all">{err}</div>}
+    <Modal
+      onClose={onClose}
+      title={`新增鍵（DB ${database}）`}
+      icon={KeyRound}
+      size="sm"
+      zClass="z-[60]"
+      bodyClassName="p-5 space-y-3 overflow-auto"
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>取消</Button>
+        <Button variant="primary" loading={busy} disabled={busy} onClick={submit}>建立</Button>
+      </>}
+    >
+      {err && <div className="text-red-400 text-sm mono break-all">{err}</div>}
 
           <div className="space-y-1">
-            <label className="text-xs text-white/50">鍵名</label>
+            <label className="text-xs text-fg/50">鍵名</label>
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 user:1000"
-              className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-blue-500" />
+              className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent" />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs text-white/50">型別</label>
+            <label className="text-xs text-fg/50">型別</label>
             <div className="flex gap-1">
               {TYPES.map((t) => (
                 <button key={t.v} type="button" onClick={() => setType(t.v)}
-                  className={`px-2.5 py-1 text-xs rounded ${type === t.v ? "bg-blue-600 text-white" : "bg-white/5 text-white/60 hover:bg-white/10"}`}>
+                  className={`px-2.5 py-1 text-xs rounded ${type === t.v ? "bg-blue-600 text-fg" : "bg-fg/5 text-fg/60 hover:bg-fg/10"}`}>
                   {t.label}
                 </button>
               ))}
@@ -91,36 +100,26 @@ export default function NewKeyDialog({ connId, database, onClose, onCreated }: {
 
           {type === "hash" && (
             <div className="space-y-1">
-              <label className="text-xs text-white/50">field</label>
-              <input value={field} onChange={(e) => setField(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-blue-500" />
+              <label className="text-xs text-fg/50">field</label>
+              <input aria-label="field" value={field} onChange={(e) => setField(e.target.value)}
+                className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent" />
             </div>
           )}
           {type === "zset" && (
             <div className="space-y-1">
-              <label className="text-xs text-white/50">score</label>
-              <input type="number" value={score} onChange={(e) => setScore(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-blue-500" />
+              <label className="text-xs text-fg/50">score</label>
+              <input aria-label="score" type="number" value={score} onChange={(e) => setScore(e.target.value)}
+                className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent" />
             </div>
           )}
 
           <div className="space-y-1">
-            <label className="text-xs text-white/50">
+            <label className="text-xs text-fg/50">
               {type === "string" ? "value" : type === "set" || type === "zset" ? "member" : "value"}
             </label>
-            <textarea value={value} onChange={(e) => setValue(e.target.value)} rows={type === "string" ? 4 : 2}
-              className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-blue-500 resize-none break-all" />
+            <textarea aria-label="值" value={value} onChange={(e) => setValue(e.target.value)} rows={type === "string" ? 4 : 2}
+              className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent resize-none break-all" />
           </div>
-        </div>
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5">取消</button>
-          <button type="button" disabled={busy} onClick={submit}
-            className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40">
-            {busy ? "建立中…" : "建立"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

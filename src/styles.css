@@ -2,9 +2,90 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   主題變數：深色為預設（:root），亮色由 <html class="light"> 覆寫。
+   值為 RGB 三通道（空白分隔），供 Tailwind rgb(var(--x) / <alpha>) 使用，
+   使 text-fg/60、border-fg/10 這類透明度語法自動跟著主題翻轉。
+   ============================================================ */
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC",
-    "Microsoft JhengHei", sans-serif;
+  /* 深色：冷調藍石板（cool slate），各表面拉開明度層次以營造「景深」，
+     而非舊版擠在同一窄帶造成的扁平感。由深到淺：well→inset→app→panel→bar→elevated。 */
+  --c-well: 11 15 22; /* #0b0f16 最深凹陷：結果 / 程式碼 / 聚焦編輯器 */
+  --c-inset: 15 20 28; /* #0f141c 凹陷輸入框 / 區塊 */
+  --c-app: 18 23 33; /* #121721 應用畫布 / 分頁內容（最底層） */
+  --c-panel: 25 32 45; /* #19202d 側欄 / 面板 / 狀態列 / 詳細資料 */
+  --c-bar: 31 40 55; /* #1f2837 上方工具列（微抬升） */
+  --c-elevated: 38 49 66; /* #263142 對話框 / 選單 / 卡片 / 表頭（最高層） */
+  --c-fg: 228 233 242; /* #e4e9f2 冷石板前景（比純白柔和、與表面同調） */
+  --c-accent: 59 130 246; /* #3b82f6 主強調色（品牌藍，與 mysql 色標一致） */
+  --c-shadow: 0 0 0; /* 陰影基底（深色＝黑） */
+  --shadow-strength: 0.5; /* 陰影濃度（表面變亮後略加深以維持浮起感） */
+
+  /* ---- 圓角刻度：控制項=sm(5)、容器=md(8)、modal=lg(12)、徽章=xs(3) ---- */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-full: 9999px;
+
+  /* ---- 景深刻度（深色帶頂端 inset highlight，模擬上方打光的金屬感）。
+     由既有 --c-shadow / --shadow-strength 驅動，故隨主題自動翻轉。 ---- */
+  --e-0: none; /* 資料表格本體：凹陷 well，刻進去而非浮起 */
+  --e-1: 0 1px 2px rgb(var(--c-shadow) / calc(var(--shadow-strength) * 0.55)),
+         inset 0 1px 0 rgb(255 255 255 / 0.04); /* 面板 / 工具列 / 狀態列 / sticky 表頭 */
+  --e-2: 0 2px 6px -1px rgb(var(--c-shadow) / calc(var(--shadow-strength) * 0.75)),
+         inset 0 1px 0 rgb(255 255 255 / 0.05); /* 下拉 / 抬升分頁 */
+  --e-3: 0 6px 16px -4px rgb(var(--c-shadow) / calc(var(--shadow-strength) * 0.9)); /* 選單 / popover / toast */
+  --e-4: 0 18px 50px -12px rgb(var(--c-shadow) / var(--shadow-strength)); /* 對話框（= 既有 shadow-2xl） */
+
+  /* ---- 控制項高度（4px grid，收掉各檔 py-1/1.5 自由發揮）---- */
+  --h-sm: 28px; /* input / 次按鈕 / 分頁 / 樹狀列 */
+  --h-md: 32px; /* 主按鈕 / 工具列動作 */
+  --h-lg: 36px; /* AI 送出鈕 */
+
+  /* ---- 語意意圖色（深色基底；亮色於 .light 覆寫）。取代散落的 red-300 / emerald-300/70。 ---- */
+  --c-success: 34 197 94; /* #22c55e */
+  --c-warning: 234 179 8; /* #eab308 */
+  --c-danger: 239 68 68; /* #ef4444 */
+  --c-info: 59 130 246; /* #3b82f6 */
+  --c-guide: var(--c-fg); /* 樹狀縮排導引線（以低透明度使用） */
+  color-scheme: dark;
+}
+
+/* 亮色主題：柔和冷調畫布 + 純白面板，靠淺色階與柔影營造層次；
+   保留與深色一致的藍石板調性，使品牌感跨主題連貫。 */
+:root.light {
+  --c-app: 240 243 249; /* #f0f3f9 柔和冷調畫布 */
+  --c-panel: 255 255 255; /* 純白側欄 / 面板 / 詳細資料 */
+  --c-bar: 255 255 255; /* 純白工具列 */
+  --c-elevated: 255 255 255; /* 純白對話框 / 選單（靠陰影浮起） */
+  --c-inset: 236 240 247; /* #ecf0f7 凹陷輸入框 */
+  --c-well: 228 233 242; /* #e4e9f2 更深凹陷：結果 / 程式碼 */
+  --c-fg: 28 35 50; /* #1c2332 深冷石板前景文字 */
+  --c-accent: 37 99 235; /* #2563eb 亮色下加深的強調色 */
+  --c-shadow: 30 41 59; /* slate-800 作為柔和陰影色 */
+  --shadow-strength: 0.13;
+
+  /* 亮色景深：較柔、分層、無 inset highlight（重用深色的 inset 會發髒）。 */
+  --e-1: 0 1px 2px rgb(var(--c-shadow) / 0.08);
+  --e-2: 0 2px 6px -1px rgb(var(--c-shadow) / 0.10), 0 1px 2px rgb(var(--c-shadow) / 0.06);
+  --e-3: 0 8px 20px -6px rgb(var(--c-shadow) / 0.14), 0 2px 6px rgb(var(--c-shadow) / 0.08);
+  --e-4: 0 24px 60px -16px rgb(var(--c-shadow) / 0.18), 0 6px 16px rgb(var(--c-shadow) / 0.10);
+
+  /* 亮色語意色：加深以維持對比。 */
+  --c-success: 22 163 74; /* #16a34a */
+  --c-warning: 217 119 6; /* #d97706 */
+  --c-danger: 220 38 38; /* #dc2626 */
+  --c-info: 37 99 235; /* #2563eb */
+  color-scheme: light;
+}
+
+:root {
+  /* 介面字：Inter（離線內嵌）優先，中文自動 fallback 到系統 PingFang / 微軟正黑。 */
+  font-family: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Microsoft JhengHei", sans-serif;
+  /* cv05＝單層 a、cv08＝改良 6/9、tabular-friendly；提升開發者工具的辨識度。 */
+  font-feature-settings: "cv05", "cv08";
 }
 
 html, body, #root {
@@ -13,22 +94,34 @@ html, body, #root {
 }
 
 body {
-  background: #0f1419;
-  color: #e6e6e6;
+  background: rgb(var(--c-app));
+  color: rgb(var(--c-fg));
+  /* 主題切換時整體柔順過渡，不突兀。 */
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* 對話框 / 選單 / 卡片的陰影改用主題變數，亮色下為柔和淺影而非死黑。 */
+.shadow-lg,
+.shadow-2xl,
+.shadow-xl {
+  --tw-shadow-color: rgb(var(--c-shadow) / var(--shadow-strength));
+}
+.shadow-2xl {
+  box-shadow: var(--e-4);
 }
 
 /* 等寬字型用於資料/SQL */
 .mono {
-  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-family: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
 
 /* ---- 全域 UI/UX 打磨：致敬商用工具的精緻手感 ---- */
 
-/* 細捲軸，融入深色主題（取代系統粗捲軸的突兀感）。 */
+/* 細捲軸，融入主題（取代系統粗捲軸的突兀感）。以前景變數著色，明暗自動翻轉。 */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgb(var(--c-fg) / 0.22) transparent;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -38,13 +131,13 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgb(var(--c-fg) / 0.16);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: rgb(var(--c-fg) / 0.3);
   background-clip: content-box;
 }
 ::-webkit-scrollbar-corner {
@@ -53,12 +146,12 @@ body {
 
 /* 文字選取色：藍調，與品牌色一致。 */
 ::selection {
-  background: rgba(59, 130, 246, 0.35);
+  background: rgb(var(--c-accent) / 0.35);
 }
 
 /* 可聚焦元素的清晰焦點環（鍵盤導覽友善，滑鼠點擊不顯示）。 */
 :focus-visible {
-  outline: 2px solid rgba(59, 130, 246, 0.6);
+  outline: 2px solid rgb(var(--c-accent) / 0.6);
   outline-offset: -1px;
 }
 button:focus:not(:focus-visible),
@@ -73,7 +166,20 @@ button,
 a,
 [role="button"] {
   transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease,
-    opacity 0.12s ease;
+    opacity 0.12s ease, transform 0.08s ease, box-shadow 0.12s ease;
+}
+
+/* 按壓回饋（致敬商用工具的「機械感」）：實際 <button> 與 role=button 才縮放，
+   樹狀 / 儲存格等用 div onClick 不受影響。disabled 不觸發 :active。 */
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  button:active,
+  [role="button"]:active {
+    transform: none;
+  }
 }
 
 /* 全域不可選取 UI 文字（資料表 / 編輯器內仍可選取，由元件自行覆寫）。 */
@@ -98,10 +204,69 @@ input[type="number"]::-webkit-outer-spin-button {
   margin: 0;
 }
 
-/* 下拉選單在深色底的可讀性（部分平台 option 會吃系統色）。 */
+/* 下拉選單的可讀性（部分平台 option 會吃系統色）。隨主題著色。 */
 option {
-  background: #1a212b;
-  color: #e6e6e6;
+  background: rgb(var(--c-elevated));
+  color: rgb(var(--c-fg));
+}
+
+/* ============================================================
+   強調色按鈕：實心 accent 底（藍 / 紅 / 綠 / 琥珀…）一律白字，
+   不受 fg 隨主題翻轉影響（否則亮色下會變成深字配深底、看不清）。
+   置於 utilities 之後，故同特異度下後者勝出。以精確 token 比對，
+   不誤傷淡色徽章（如 bg-blue-500/15 text-blue-300）。
+   ============================================================ */
+[class~="bg-blue-600"],
+[class~="bg-blue-500"],
+[class~="bg-blue-600/80"],
+[class~="bg-blue-600/90"],
+[class~="bg-red-600"],
+[class~="bg-red-500"],
+[class~="bg-green-600"],
+[class~="bg-green-500"],
+[class~="bg-amber-600"],
+[class~="bg-amber-500"],
+[class~="bg-emerald-600"],
+[class~="bg-emerald-500"] {
+  color: #fff;
+}
+
+/* ============================================================
+   亮色主題：把為深底設計的「淡色」強調文字（300/400 級）
+   加深為可讀對比；僅在 .light 下生效，深色主題完全不受影響。
+   ============================================================ */
+:root.light .text-blue-300,
+:root.light .text-blue-400 {
+  color: #1d4ed8;
+}
+:root.light .text-red-200 {
+  color: #b91c1c;
+}
+:root.light .text-red-300,
+:root.light .text-red-400 {
+  color: #dc2626;
+}
+:root.light .text-amber-300,
+:root.light .text-amber-400 {
+  color: #b45309;
+}
+:root.light .text-yellow-300 {
+  color: #a16207;
+}
+:root.light .text-green-200,
+:root.light .text-green-300,
+:root.light .text-green-400 {
+  color: #15803d;
+}
+:root.light .text-emerald-300,
+:root.light .text-emerald-400 {
+  color: #047857;
+}
+:root.light .text-sky-300 {
+  color: #0369a1;
+}
+:root.light .text-purple-300 {
+  color: #7e22ce;
 }
 
 /* ---- 開場動畫（啟動時的品牌動態）---- */
@@ -113,7 +278,7 @@ option {
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(120% 90% at 50% 38%, #1b2433 0%, #0f1419 60%, #0a0e13 100%);
+    radial-gradient(120% 90% at 50% 38%, #1f2837 0%, #121721 58%, #0a0e15 100%);
   overflow: hidden;
 }
 /* 整體淡出後解除掛載。 */
@@ -189,11 +354,39 @@ option {
   to { opacity: 0; visibility: hidden; }
 }
 
+/* ---- Toast 進場：自右側輕滑入 + 淡入（主要回饋通道，不突兀）---- */
+.toast-in {
+  animation: toast-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px) translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- 對話框進場（Modal 用）：背板淡入 + shell 微縮放上浮，沿用 splash 的回彈緩動 ---- */
+.modal-backdrop-in {
+  animation: modal-backdrop-in 0.14s ease forwards;
+}
+.modal-shell-in {
+  animation: modal-shell-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-shell-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* 尊重「減少動態效果」偏好：仍顯示標誌，但去除動畫。 */
 @media (prefers-reduced-motion: reduce) {
   .splash__logo,
   .splash__glow,
-  .splash__shine {
+  .splash__shine,
+  .modal-backdrop-in,
+  .modal-shell-in,
+  .toast-in {
     animation: none;
     opacity: 1;
     transform: none;

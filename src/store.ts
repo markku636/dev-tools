@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { ConnectionConfig } from "./api";
+import { ConnectionConfig, DbKind } from "./api";
 
 // 一個開啟的表分頁
 export interface OpenTab {
@@ -10,6 +10,12 @@ export interface OpenTab {
   view: "data" | "structure"; // 結構 / 資料 分頁
   objKind: string;    // "table" | "view"（視圖不可新增資料列）
 }
+
+// 右側「詳細資料」面板目前選取的樹節點（單擊即選；對標 Navicat 物件資訊面板）。
+export type SelectedNode =
+  | { type: "connection"; connId: string }
+  | { type: "database"; connId: string; db: string; kind: DbKind }
+  | { type: "table"; connId: string; db: string; table: string; kind: DbKind; objKind: string };
 
 interface AppStore {
   // 已儲存的連線設定（持久化於磁碟，密碼存 OS keychain；啟動時載入清單）
@@ -27,6 +33,8 @@ interface AppStore {
   pendingInsert: string | null;
   // 資料重載信號：key（connId:db:table）→ nonce，外部操作（如 TRUNCATE）後遞增以強制開啟中的資料頁重載。
   dataReload: Record<string, number>;
+  // 右側詳細資料面板目前選取的節點（單擊樹節點即更新）。
+  selectedNode: SelectedNode | null;
 
   setConnections: (cs: ConnectionConfig[]) => void;
   addConnection: (c: ConnectionConfig) => void;
@@ -52,6 +60,8 @@ interface AppStore {
   clearPendingInsert: () => void;
   // 遞增某表的資料重載 nonce（TRUNCATE 後呼叫，使開啟中的資料頁重新查詢）。
   bumpDataReload: (connId: string, database: string, table: string) => void;
+  // 設定詳細資料面板選取的節點（null 清空）。
+  selectNode: (node: SelectedNode | null) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -63,6 +73,7 @@ export const useStore = create<AppStore>((set) => ({
   pendingSql: null,
   pendingInsert: null,
   dataReload: {},
+  selectedNode: null,
 
   setConnections: (cs) => set({ connections: cs }),
   addConnection: (c) =>
@@ -71,6 +82,7 @@ export const useStore = create<AppStore>((set) => ({
     set((s) => ({
       connections: s.connections.filter((c) => c.id !== id),
       activeId: s.activeId === id ? null : s.activeId,
+      selectedNode: s.selectedNode?.connId === id ? null : s.selectedNode,
     })),
   setActive: (id) => set({ activeId: id }),
   markConnected: (id) =>
@@ -84,12 +96,14 @@ export const useStore = create<AppStore>((set) => ({
       return {
         connectedIds: next,
         tabs,
+        // 中斷連線後，該連線底下的資料庫 / 表節點已不可見，連帶清空詳細資料選取。
+        selectedNode: s.selectedNode?.connId === id ? null : s.selectedNode,
         // "__query__" 是查詢分頁的哨兵鍵，從不在 tabs 內；它屬於仍連線的連線，
         // 中斷其他連線時應保留，不該把使用者踢離查詢編輯器。
         activeTabKey:
           s.activeTabKey === "__query__" || tabs.some((t) => t.key === s.activeTabKey)
             ? s.activeTabKey
-            : tabs.length ? tabs[tabs.length - 1].key : null,
+            : tabs.length ? tabs[tabs.length - 1].key : "__query__",
       };
     }),
 
@@ -108,17 +122,18 @@ export const useStore = create<AppStore>((set) => ({
       const tabs = s.tabs.filter((t) => t.key !== key);
       return {
         tabs,
+        // 沒有表分頁時退回查詢分頁哨兵（而非 null），使查詢分頁標示為作用中、鍵盤切換索引正確。
         activeTabKey:
-          s.activeTabKey === key ? tabs.length ? tabs[tabs.length - 1].key : null : s.activeTabKey,
+          s.activeTabKey === key ? (tabs.length ? tabs[tabs.length - 1].key : "__query__") : s.activeTabKey,
       };
     }),
   // 關閉除 key 以外的所有表分頁；保留 key 並設為作用中。
   closeOtherTabs: (key) =>
     set((s) => {
       const tabs = s.tabs.filter((t) => t.key === key);
-      return { tabs, activeTabKey: tabs.length ? key : null };
+      return { tabs, activeTabKey: tabs.length ? key : "__query__" };
     }),
-  closeAllTabs: () => set({ tabs: [], activeTabKey: null }),
+  closeAllTabs: () => set({ tabs: [], activeTabKey: "__query__" }),
   // 設定待載入 SQL 並切到查詢分頁（QueryPane 掛載後消費）。
   requestQuery: (sql) => set({ pendingSql: sql, activeTabKey: "__query__" }),
   clearPendingSql: () => set({ pendingSql: null }),
@@ -136,7 +151,7 @@ export const useStore = create<AppStore>((set) => ({
       return {
         tabs,
         activeTabKey:
-          s.activeTabKey === key ? (tabs.length ? tabs[tabs.length - 1].key : null) : s.activeTabKey,
+          s.activeTabKey === key ? (tabs.length ? tabs[tabs.length - 1].key : "__query__") : s.activeTabKey,
       };
     }),
   closeTablesUnder: (connId, database) =>
@@ -146,7 +161,7 @@ export const useStore = create<AppStore>((set) => ({
       const stillActive = s.activeTabKey === "__query__" || tabs.some((t) => t.key === s.activeTabKey);
       return {
         tabs,
-        activeTabKey: stillActive ? s.activeTabKey : tabs.length ? tabs[tabs.length - 1].key : null,
+        activeTabKey: stillActive ? s.activeTabKey : tabs.length ? tabs[tabs.length - 1].key : "__query__",
       };
     }),
   bumpDataReload: (connId, database, table) =>
@@ -154,4 +169,5 @@ export const useStore = create<AppStore>((set) => ({
       const key = `${connId}:${database}:${table}`;
       return { dataReload: { ...s.dataReload, [key]: (s.dataReload[key] ?? 0) + 1 } };
     }),
+  selectNode: (node) => set({ selectedNode: node }),
 }));

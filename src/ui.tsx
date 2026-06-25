@@ -13,6 +13,34 @@ export function useEscToClose(onClose: () => void) {
   }, []);
 }
 
+// 手刻覆蓋層（非 ui/Modal）掛載期間計入 body.dataset.modalCount，
+// 讓全域鍵盤處理（分頁切換 Ctrl+W/Ctrl+Tab/Ctrl+1-9、側欄 "/" 聚焦等）在其開啟時讓路，
+// 不會在可見的覆蓋層「背後」誤動作。自帶 Esc 處理的覆蓋層用這個。
+export function useModalCount() {
+  useEffect(() => {
+    const b = document.body;
+    b.dataset.modalCount = String(Number(b.dataset.modalCount ?? "0") + 1);
+    return () => {
+      const m = Number(b.dataset.modalCount ?? "1") - 1;
+      if (m <= 0) delete b.dataset.modalCount;
+      else b.dataset.modalCount = String(m);
+    };
+  }, []);
+}
+
+// 手刻覆蓋層共用：計入 modalCount + Esc 關閉（stopPropagation 避免底層其他 Esc 監聽連帶反應）。
+// 用於 RowDetailModal / CellInspector / KeyDetailModal / InsertDialog 等非 ui/Modal 的浮層。
+export function useModalOverlay(onClose: () => void) {
+  const ref = useRef(onClose);
+  ref.current = onClose;
+  useModalCount();
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); ref.current(); } };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+}
+
 // ---- Toast 通知 + 確認對話框 共用狀態 ----
 
 export interface Toast {
@@ -170,49 +198,71 @@ export async function pickSaveFile(defaultPath?: string, filters?: Filter[]): Pr
 // ---- 掛在 App 根的通知 / 確認渲染層 ----
 
 export function UiHost() {
-  const { toasts, dismissToast, confirmReq, resolveConfirm, promptReq } = useUi();
+  const { toasts, dismissToast, confirmReq, resolveConfirm, promptReq, resolvePrompt } = useUi();
+
+  // Esc 取消最上層的 confirm / prompt：用 capture 階段，先於 Modal 的 bubble 監聽並 stopPropagation，
+  // 避免 Esc 關掉底下的對話框（confirm/prompt 不在 Modal 堆疊內，否則會被 Modal 攔走）。
+  useEffect(() => {
+    if (!confirmReq && !promptReq) return;
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      if (promptReq) resolvePrompt(null);
+      else resolveConfirm(false);
+    };
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
+  }, [confirmReq, promptReq, resolveConfirm, resolvePrompt]);
 
   const kindStyle = (k: Toast["kind"]) =>
     k === "success"
       ? "border-green-500/40 bg-green-500/15 text-green-200"
       : k === "error"
       ? "border-red-500/40 bg-red-500/15 text-red-200"
-      : "border-white/15 bg-white/10 text-white/80";
+      : "border-fg/15 bg-fg/10 text-fg/80";
 
   return (
     <>
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 w-80 max-w-[90vw]">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            onClick={() => dismissToast(t.id)}
-            className={`px-3 py-2 rounded-md shadow-lg text-sm border cursor-pointer break-words ${kindStyle(t.kind)}`}
-          >
-            {t.text}
-          </div>
-        ))}
+      <div
+        className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 w-80 max-w-[90vw]"
+        role="region"
+        aria-label="通知"
+      >
+        {toasts.map((t) => {
+          const cls = `toast-in px-3 py-2 rounded-md shadow-lg text-sm border cursor-pointer break-words ${kindStyle(t.kind)}`;
+          // 錯誤用 alert/assertive（立即播報），其餘用 status/polite。以字面值滿足 a11y lint。
+          return t.kind === "error" ? (
+            <div key={t.id} role="alert" aria-live="assertive" onClick={() => dismissToast(t.id)} className={cls}>
+              {t.text}
+            </div>
+          ) : (
+            <div key={t.id} role="status" aria-live="polite" onClick={() => dismissToast(t.id)} className={cls}>
+              {t.text}
+            </div>
+          );
+        })}
       </div>
 
       {confirmReq && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110]"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[110]"
           onClick={() => resolveConfirm(false)}
         >
           <div
-            className="bg-[#1a212b] w-[380px] max-w-[92vw] rounded-lg border border-white/10 shadow-2xl"
+            className="bg-elevated w-[380px] max-w-[92vw] rounded-lg border border-fg/10 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-3 border-b border-white/10 font-medium text-sm">
+            <div className="px-5 py-3 border-b border-fg/10 font-medium text-sm">
               {confirmReq.title ?? "確認"}
             </div>
-            <div className="p-5 text-sm text-white/80 whitespace-pre-wrap break-words">
+            <div className="p-5 text-sm text-fg/80 whitespace-pre-wrap break-words">
               {confirmReq.message}
             </div>
-            <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
+            <div className="px-5 py-3 border-t border-fg/10 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => resolveConfirm(false)}
-                className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5"
+                className="px-3 py-1.5 text-sm rounded border border-fg/15 hover:bg-fg/5"
               >
                 取消
               </button>
@@ -244,18 +294,18 @@ function PromptDialog() {
   if (!promptReq) return null;
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[110]"
+      className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[110]"
       onClick={() => resolvePrompt(null)}
     >
       <div
-        className="bg-[#1a212b] w-[380px] max-w-[92vw] rounded-lg border border-white/10 shadow-2xl"
+        className="bg-elevated w-[380px] max-w-[92vw] rounded-lg border border-fg/10 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-3 border-b border-white/10 font-medium text-sm">
+        <div className="px-5 py-3 border-b border-fg/10 font-medium text-sm">
           {promptReq.title ?? "輸入"}
         </div>
         <div className="p-5 space-y-3">
-          <div className="text-sm text-white/80 whitespace-pre-wrap break-words">
+          <div className="text-sm text-fg/80 whitespace-pre-wrap break-words">
             {promptReq.message}
           </div>
           <input
@@ -267,14 +317,14 @@ function PromptDialog() {
               if (e.key === "Enter") resolvePrompt(text);
               else if (e.key === "Escape") resolvePrompt(null);
             }}
-            className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-blue-500"
+            className="w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm mono outline-none focus:border-accent"
           />
         </div>
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
+        <div className="px-5 py-3 border-t border-fg/10 flex justify-end gap-2">
           <button
             type="button"
             onClick={() => resolvePrompt(null)}
-            className="px-3 py-1.5 text-sm rounded border border-white/15 hover:bg-white/5"
+            className="px-3 py-1.5 text-sm rounded border border-fg/15 hover:bg-fg/5"
           >
             取消
           </button>

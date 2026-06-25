@@ -5,8 +5,9 @@ use mongodb::{Client, IndexModel};
 use std::time::Duration;
 
 use crate::db::{
-    fmt_bytes, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, Filter, IndexInfo,
-    PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, Sort, SortDir, TableInfo,
+    finalize_hits, fmt_bytes, CellEdit, ColumnInfo, ConnectionConfig, DataQuery, DatabaseDriver, Filter,
+    IndexInfo, PagedData, PoolStatus, QueryResult, RowDelete, RowInsert, SearchHit, SearchOptions, Sort,
+    SortDir, TableInfo,
 };
 use crate::error::{AppError, AppResult};
 
@@ -610,6 +611,46 @@ impl DatabaseDriver for MongoDriver {
             .drop()
             .await
             .map_err(|e| AppError::Query(e.to_string()))
+    }
+
+    async fn search_objects(&self, opts: &SearchOptions) -> AppResult<Vec<SearchHit>> {
+        // MongoDB 無 SQL 物件；僅以名稱比對集合（object_type=collection）。
+        if opts.term.is_empty() || !opts.match_names || !opts.wants_type("collection") {
+            return Ok(vec![]);
+        }
+        const SYS: [&str; 3] = ["admin", "config", "local"];
+        let dbs: Vec<String> = match &opts.databases {
+            Some(list) if !list.is_empty() => list.clone(),
+            _ => self
+                .client
+                .list_database_names()
+                .await
+                .map_err(|e| AppError::Query(e.to_string()))?
+                .into_iter()
+                .filter(|d| !SYS.iter().any(|s| s.eq_ignore_ascii_case(d)))
+                .collect(),
+        };
+        let mut hits = Vec::new();
+        for db in dbs {
+            let names = match self.db_handle(&db).list_collection_names().await {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+            for name in names {
+                if opts.hit(&name) {
+                    hits.push(SearchHit {
+                        database: db.clone(),
+                        object_type: "collection".into(),
+                        object_name: name,
+                        parent: None,
+                        matched_in: "name".into(),
+                        snippet: None,
+                        extra: None,
+                    });
+                }
+            }
+        }
+        Ok(finalize_hits(hits, opts))
     }
 
     fn pool_status(&self) -> PoolStatus {
