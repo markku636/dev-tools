@@ -701,8 +701,17 @@ function DataPane({ tab }: { tab: OpenTab }) {
       return;
     }
     else if (editable && k === "Delete") {
-      // Delete → 直接設為 NULL（最常見的破壞性編輯，免走右鍵選單）。
-      commitEdit(r, c, "", true); e.preventDefault(); return;
+      // Delete → 設為 NULL（最常見的破壞性編輯，免走右鍵選單）。有框選範圍則整塊設 NULL。
+      e.preventDefault();
+      if (rangeEnd) {
+        const r1 = Math.min(selected.r, rangeEnd.r), r2 = Math.max(selected.r, rangeEnd.r);
+        const p1 = visIdx.indexOf(selected.c), p2 = visIdx.indexOf(rangeEnd.c);
+        const cols = visIdx.slice(Math.min(p1, p2), Math.max(p1, p2) + 1);
+        for (let rr = r1; rr <= r2; rr++) for (const cc of cols) commitEdit(rr, cc, "", true);
+      } else {
+        commitEdit(r, c, "", true);
+      }
+      return;
     }
     else if (editable && k === "Backspace") {
       // Backspace → 清空後進入編輯（Excel 慣例）。
