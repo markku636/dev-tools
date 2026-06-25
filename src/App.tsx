@@ -2474,6 +2474,13 @@ function ResultTable({ result }: { result: QueryResult }) {
   const fmtNum = (n: number) =>
     Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
+  // 鍵盤導覽時將作用中的儲存格（框選遠端角 rangeEnd，否則選取格）捲入可視範圍。
+  const activeCell = rangeEnd ?? selected;
+  const activeCellRef = useRef<HTMLTableCellElement>(null);
+  useEffect(() => {
+    activeCellRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selected, rangeEnd]);
+
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       // Esc 先關開啟中的選單，其次取消儲存格 / 範圍選取。
@@ -2489,12 +2496,32 @@ function ResultTable({ result }: { result: QueryResult }) {
       setRangeEnd({ r: rendered.length - 1, c: result.columns.length - 1 });
       return;
     }
-    if (!selected) return;
     if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+      if (!selected) return;
       if (rangeEnd) copyRange();
       else copyCell(selected.r, selected.c);
       e.preventDefault();
+      return;
     }
+    // 鍵盤導覽：方向鍵移動選取、Home/End 跳列首尾欄、Ctrl+Home/End 跳整頁角落；Shift+方向鍵延伸框選。
+    const navKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!navKeys.includes(e.key)) return;
+    const maxR = rendered.length - 1;
+    const maxC = result.columns.length - 1;
+    if (maxR < 0 || maxC < 0) return;
+    e.preventDefault();
+    if (!selected) { setSelected({ r: 0, c: 0 }); setRangeEnd(null); return; }
+    const base = e.shiftKey ? (rangeEnd ?? selected) : selected;
+    let nr = base.r;
+    let nc = base.c;
+    if (e.key === "ArrowDown") nr = Math.min(maxR, base.r + 1);
+    else if (e.key === "ArrowUp") nr = Math.max(0, base.r - 1);
+    else if (e.key === "ArrowRight") nc = Math.min(maxC, base.c + 1);
+    else if (e.key === "ArrowLeft") nc = Math.max(0, base.c - 1);
+    else if (e.key === "Home") { nc = 0; if (e.ctrlKey) nr = 0; }
+    else if (e.key === "End") { nc = maxC; if (e.ctrlKey) nr = maxR; }
+    if (e.shiftKey) setRangeEnd({ r: nr, c: nc });
+    else { setSelected({ r: nr, c: nc }); setRangeEnd(null); }
   };
 
   return (
@@ -2553,6 +2580,7 @@ function ResultTable({ result }: { result: QueryResult }) {
               <td className={`px-3 py-1 border-b border-fg/5 text-fg/30 tabular-nums ${rowSel ? "text-accent/90" : "bg-fg/[0.015]"}`}>{i + 1}</td>
               {row.map((c, j) => (
                 <td key={j}
+                  ref={activeCell?.r === i && activeCell?.c === j ? activeCellRef : undefined}
                   onClick={(e) => {
                     // Shift+點選：以選取格為錨點框選矩形（Ctrl+C 整塊複製）；一般點選重置為單格。
                     if (e.shiftKey && selected) setRangeEnd({ r: i, c: j });
