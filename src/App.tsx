@@ -35,6 +35,7 @@ import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
   loadSavedQueries, persistSavedQueries,
   resultToTsv, resultToJson, resultToCsv, resultToMarkdown, fmtElapsed, splitSqlStatements, statementAtOffset, isDangerousStatement, isDangerousRedisCommand,
+  rectToTsv, rangeStats,
   quoteIdent, qualifiedName,
   buildDropTable, buildDropView, buildDropRoutine, buildTruncateTable, buildRenameTable, buildDuplicateTable, isSystemDatabase,
   buildTableMaintenance, buildInsertAllRows, tableSizesSql,
@@ -2372,6 +2373,8 @@ function QueryPane() {
 
 function ResultTable({ result }: { result: QueryResult }) {
   const [selected, setSelected] = useState<{ r: number; c: number } | null>(null);
+  // 範圍選取（Shift+點選第二角）：null = 單格。Ctrl+C 複製整個矩形為 TSV，狀態列顯示統計。
+  const [rangeEnd, setRangeEnd] = useState<{ r: number; c: number } | null>(null);
   const [menu, setMenu] = useState<{ r: number; c: number; x: number; y: number } | null>(null);
   const [colMenu, setColMenu] = useState<{ c: number; x: number; y: number } | null>(null);
   const [inspect, setInspect] = useState<{ r: number; c: number } | null>(null);
@@ -2445,16 +2448,40 @@ function ResultTable({ result }: { result: QueryResult }) {
   const toggleSort = (ci: number) =>
     setSort((s) => (s?.c === ci ? (s.dir === "asc" ? { c: ci, dir: "desc" } : null) : { c: ci, dir: "asc" }));
 
+  // 範圍選取矩形（結果集無隱藏欄，欄序即 0..n-1）：Shift+點選第二角。
+  const rangeBox = selected && rangeEnd
+    ? { r1: Math.min(selected.r, rangeEnd.r), r2: Math.max(selected.r, rangeEnd.r), c1: Math.min(selected.c, rangeEnd.c), c2: Math.max(selected.c, rangeEnd.c) }
+    : null;
+  const inRange = (r: number, c: number) =>
+    !!rangeBox && r >= rangeBox.r1 && r <= rangeBox.r2 && c >= rangeBox.c1 && c <= rangeBox.c2;
+  const copyRange = () => {
+    if (!rangeBox) return;
+    const rows = Array.from({ length: rangeBox.r2 - rangeBox.r1 + 1 }, (_, k) => rangeBox.r1 + k);
+    const cols = Array.from({ length: rangeBox.c2 - rangeBox.c1 + 1 }, (_, k) => rangeBox.c1 + k);
+    copyToClipboard(rectToTsv((r, c) => cell(r, c), rows, cols), `已複製 ${rows.length}×${cols.length} 區塊 (TSV)`);
+  };
+  // 框選範圍統計（Excel 狀態列手感）。以 selected/rangeEnd/viewRows 為相依重算。
+  const selStats = useMemo(() => {
+    if (!rangeBox) return null;
+    const vals: (string | null)[] = [];
+    for (let r = rangeBox.r1; r <= rangeBox.r2; r++) for (let c = rangeBox.c1; c <= rangeBox.c2; c++) vals.push(viewRows[r]?.[c] ?? null);
+    return { rows: rangeBox.r2 - rangeBox.r1 + 1, colsN: rangeBox.c2 - rangeBox.c1 + 1, ...rangeStats(vals) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, rangeEnd, viewRows]);
+  const fmtNum = (n: number) =>
+    Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
-      // Esc 先關開啟中的選單，其次取消儲存格選取。
+      // Esc 先關開啟中的選單，其次取消儲存格 / 範圍選取。
       if (menu || colMenu) { setMenu(null); setColMenu(null); }
-      else setSelected(null);
+      else { setSelected(null); setRangeEnd(null); }
       return;
     }
     if (!selected) return;
     if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
-      copyCell(selected.r, selected.c);
+      if (rangeEnd) copyRange();
+      else copyCell(selected.r, selected.c);
       e.preventDefault();
     }
   };
@@ -2480,6 +2507,13 @@ function ResultTable({ result }: { result: QueryResult }) {
         <span className="text-xs text-fg/40">
           {rfilter.trim() ? `${viewRows.length} / ${result.rows.length} 列` : `${result.rows.length} 列`}
         </span>
+        {selStats && (
+          <span className="ml-auto text-xs text-fg/45 mono whitespace-nowrap" title="框選範圍統計（Shift+點選）">
+            已選 {selStats.rows}×{selStats.colsN}（{selStats.count} 格）
+            {selStats.numCount > 0 &&
+              ` · 數值 ${selStats.numCount} · Σ ${fmtNum(selStats.sum)} · 平均 ${fmtNum(selStats.avg)}`}
+          </span>
+        )}
       </div>
       <table className="text-sm border-collapse w-full">
         <thead className="sticky top-[34px] bg-bar">
@@ -2506,11 +2540,22 @@ function ResultTable({ result }: { result: QueryResult }) {
               <td className={`px-3 py-1 border-b border-fg/5 text-fg/30 tabular-nums ${rowSel ? "text-accent/90" : "bg-fg/[0.015]"}`}>{i + 1}</td>
               {row.map((c, j) => (
                 <td key={j}
-                  onClick={(e) => { setSelected({ r: i, c: j }); (e.currentTarget.closest("[tabindex]") as HTMLElement | null)?.focus(); }}
+                  onClick={(e) => {
+                    // Shift+點選：以選取格為錨點框選矩形（Ctrl+C 整塊複製）；一般點選重置為單格。
+                    if (e.shiftKey && selected) setRangeEnd({ r: i, c: j });
+                    else { setSelected({ r: i, c: j }); setRangeEnd(null); }
+                    (e.currentTarget.closest("[tabindex]") as HTMLElement | null)?.focus();
+                  }}
                   onDoubleClick={() => setInspect({ r: i, c: j })}
-                  onContextMenu={(e) => { e.preventDefault(); setSelected({ r: i, c: j }); setMenu({ r: i, c: j, x: e.clientX, y: e.clientY }); }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (!inRange(i, j)) { setSelected({ r: i, c: j }); setRangeEnd(null); }
+                    setMenu({ r: i, c: j, x: e.clientX, y: e.clientY });
+                  }}
                   className={`px-3 py-1 border-b border-fg/5 align-top cursor-cell ${
-                    selected?.r === i && selected?.c === j ? "ring-1 ring-inset ring-accent bg-accent/15" : ""
+                    selected?.r === i && selected?.c === j ? "ring-1 ring-inset ring-accent " : ""
+                  }${
+                    selected?.r === i && selected?.c === j ? "bg-accent/15" : inRange(i, j) ? "bg-accent/10" : ""
                   }`}
                   title={c == null ? "NULL（雙擊檢視）" : c}>
                   {c === null ? <span className="text-fg/30 italic">NULL</span> : c}
@@ -2603,6 +2648,9 @@ function ResultTable({ result }: { result: QueryResult }) {
                 ["檢視內容…", () => setInspect({ r: menu.r, c: menu.c })],
                 ["檢視此列（表單）…", () => setRowDetail(menu.r)],
                 ["複製值", () => copyCell(menu.r, menu.c)],
+                ...(rangeEnd && inRange(menu.r, menu.c)
+                  ? [["複製範圍 (TSV)", () => copyRange()] as [string, () => void]]
+                  : []),
                 ["複製整列 (TSV)", () => copyRowTsv(menu.r)],
                 ["複製整列 (JSON)", () => copyRowJson(menu.r)],
                 ["複製整欄", () => copyCol(menu.c)],
