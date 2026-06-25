@@ -2524,7 +2524,7 @@ function ResultTable({ result, onViewChange }: { result: QueryResult; onViewChan
     }
     // 鍵盤導覽：方向鍵移動選取、Home/End 跳列首尾欄、Ctrl+Home/End 跳整頁角落；
     // Shift+方向鍵延伸框選；Tab / Shift+Tab 逐格移動（列尾 / 列首換行）。
-    const navKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "Tab"];
+    const navKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "Tab", "PageUp", "PageDown"];
     if (!navKeys.includes(e.key)) return;
     const maxR = rendered.length - 1;
     const maxC = result.columns.length - 1;
@@ -2545,6 +2545,8 @@ function ResultTable({ result, onViewChange }: { result: QueryResult; onViewChan
     else if (e.key === "ArrowUp") nr = Math.max(0, base.r - 1);
     else if (e.key === "ArrowRight") nc = Math.min(maxC, base.c + 1);
     else if (e.key === "ArrowLeft") nc = Math.max(0, base.c - 1);
+    else if (e.key === "PageDown") nr = Math.min(maxR, base.r + 20);
+    else if (e.key === "PageUp") nr = Math.max(0, base.r - 20);
     else if (e.key === "Home") { nc = 0; if (e.ctrlKey) nr = 0; }
     else if (e.key === "End") { nc = maxC; if (e.ctrlKey) nr = maxR; }
     if (e.shiftKey) setRangeEnd({ r: nr, c: nc });
