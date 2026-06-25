@@ -8,7 +8,7 @@ import {
   KIND_META,
 } from "./api";
 import { pickDirectory, pickOpenFile, pickSaveFile, uiConfirm } from "./ui";
-import { Modal, Button, Segmented } from "./ui/index";
+import { Modal, Button, Segmented, Input } from "./ui/index";
 import { DatabaseBackup } from "lucide-react";
 
 interface Props {
@@ -119,14 +119,14 @@ function ManualTab({ conn, database }: { conn: ConnectionConfig; database: strin
 
       {!fileBased && conn.kind !== "redis" && (
         <Field label="資料庫名稱">
-          <input className={input} value={db} onChange={(e) => setDb(e.target.value)}
+          <Input inputSize="md" className="mono" value={db} onChange={(e) => setDb(e.target.value)}
             placeholder="要備份 / 還原的資料庫" />
         </Field>
       )}
 
       <Field label={mode === "backup" ? "輸出檔案路徑" : "備份檔路徑"}>
         <div className="flex gap-2">
-          <input className={input} value={path} onChange={(e) => setPath(e.target.value)}
+          <Input inputSize="md" className="mono" value={path} onChange={(e) => setPath(e.target.value)}
             placeholder={`例如 C:\\backups\\backup${hint.ext}`} />
           <button type="button" title="瀏覽…"
             onClick={async () => {
@@ -265,12 +265,12 @@ function SchedulesTab({ conn }: { conn: ConnectionConfig }) {
         <div className="flex gap-3">
           {conn.kind !== "redis" && (
             <Field label="資料庫名稱" className="flex-1">
-              <input className={input} value={db} onChange={(e) => setDb(e.target.value)} placeholder="留空為整庫" />
+              <Input inputSize="md" className="mono" value={db} onChange={(e) => setDb(e.target.value)} placeholder="留空為整庫" />
             </Field>
           )}
           <Field label="備份目錄" className="flex-1">
             <div className="flex gap-2">
-              <input className={input} value={dir} onChange={(e) => setDir(e.target.value)}
+              <Input inputSize="md" className="mono" value={dir} onChange={(e) => setDir(e.target.value)}
                 placeholder="例如 C:\\backups" />
               <button type="button" title="選擇目錄…"
                 onClick={async () => { const d = await pickDirectory(); if (d) setDir(d); }}
@@ -296,30 +296,30 @@ function SchedulesTab({ conn }: { conn: ConnectionConfig }) {
         <div className="flex gap-3 items-end">
           {cType === "every_minutes" && (
             <Field label="間隔（分鐘）" className="w-32">
-              <input className={input} type="number" min={1} value={minutes}
+              <Input inputSize="md" className="mono" type="number" min={1} value={minutes}
                 onChange={(e) => setMinutes(Number(e.target.value))} />
             </Field>
           )}
           {cType === "every_hours" && (
             <Field label="間隔（小時）" className="w-32">
-              <input className={input} type="number" min={1} value={hours}
+              <Input inputSize="md" className="mono" type="number" min={1} value={hours}
                 onChange={(e) => setHours(Number(e.target.value))} />
             </Field>
           )}
           {cType === "daily_at" && (
             <>
               <Field label="時" className="w-20">
-                <input className={input} type="number" min={0} max={23} value={hour}
+                <Input inputSize="md" className="mono" type="number" min={0} max={23} value={hour}
                   onChange={(e) => setHour(Number(e.target.value))} />
               </Field>
               <Field label="分" className="w-20">
-                <input className={input} type="number" min={0} max={59} value={minute}
+                <Input inputSize="md" className="mono" type="number" min={0} max={59} value={minute}
                   onChange={(e) => setMinute(Number(e.target.value))} />
               </Field>
             </>
           )}
           <Field label="保留份數（選填）" className="w-36">
-            <input className={input} type="number" min={1} value={retention}
+            <Input inputSize="md" className="mono" type="number" min={1} value={retention}
               onChange={(e) => setRetention(e.target.value)} placeholder="全部保留" />
           </Field>
           <button type="button" onClick={add}
@@ -429,8 +429,6 @@ const TOOL_HINT: Record<string, { tool: string; ext: string }> = {
   sqlite: { tool: "（檔案複製，無需工具）", ext: ".db" },
 };
 
-const input =
-  "w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm outline-none focus:border-accent mono";
 
 function Field({ label, children, className = "" }: {
   label: string; children: React.ReactNode; className?: string;
