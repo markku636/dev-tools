@@ -1310,6 +1310,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
             已選 {selectionStats.rows}×{selectionStats.colsN}（{selectionStats.count} 格）
             {selectionStats.numCount > 0 &&
               ` · 數值 ${selectionStats.numCount} · Σ ${fmtNum(selectionStats.sum)} · 平均 ${fmtNum(selectionStats.avg)}`}
+            {selectionStats.numCount > 1 &&
+              ` · 最小 ${fmtNum(selectionStats.min)} · 最大 ${fmtNum(selectionStats.max)}`}
           </span>
         ) : selected && data && data.rows[selected.r] ? (
           <span className="ml-auto mr-3 text-fg/45 text-xs truncate max-w-[40%]" title={cellValue(selected.r, selected.c) ?? "NULL"}>

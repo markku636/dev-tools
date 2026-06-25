@@ -2523,6 +2523,8 @@ function ResultTable({ result }: { result: QueryResult }) {
             已選 {selStats.rows}×{selStats.colsN}（{selStats.count} 格）
             {selStats.numCount > 0 &&
               ` · 數值 ${selStats.numCount} · Σ ${fmtNum(selStats.sum)} · 平均 ${fmtNum(selStats.avg)}`}
+            {selStats.numCount > 1 &&
+              ` · 最小 ${fmtNum(selStats.min)} · 最大 ${fmtNum(selStats.max)}`}
           </span>
         )}
       </div>
