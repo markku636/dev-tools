@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Upload } from "lucide-react";
 import { api, DataQuery, ExportFormat } from "./api";
 import { pickSaveFile, toast } from "./ui";
-import { Modal, Button } from "./ui/index";
+import { Modal, Button, Input } from "./ui/index";
 
 const FORMATS: { v: ExportFormat; label: string; ext: string }[] = [
   { v: "csv", label: "CSV", ext: "csv" },
@@ -97,7 +97,7 @@ export default function ExportDialog({ connId, database, table, query, onClose }
               </label>
               <label className="block">
                 <span className="text-xs text-fg/50 mb-1 block">NULL 顯示為</span>
-                <input className={inputCls} value={nullText} onChange={(e) => setNullText(e.target.value)}
+                <Input inputSize="md" value={nullText} onChange={(e) => setNullText(e.target.value)}
                   placeholder="（空白）" />
               </label>
             </>
@@ -106,14 +106,13 @@ export default function ExportDialog({ connId, database, table, query, onClose }
           {format === "sql" && (
             <label className="block">
               <span className="text-xs text-fg/50 mb-1 block">INSERT 目標表名</span>
-              <input className={inputCls} value={sqlTable} onChange={(e) => setSqlTable(e.target.value)} />
+              <Input inputSize="md" value={sqlTable} onChange={(e) => setSqlTable(e.target.value)} />
             </label>
           )}
     </Modal>
   );
 }
 
-const inputCls = "w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm outline-none focus:border-accent";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, ImportResult } from "./api";
 import { pickOpenFile, toast } from "./ui";
-import { Modal, Button, Segmented } from "./ui/index";
+import { Modal, Button, Segmented, Input } from "./ui/index";
 import { Download } from "lucide-react";
 
 // CSV 匯入對話框（致敬 Navicat / DBeaver 匯入精靈）。逐列以 insert_row 寫入目標表。
@@ -88,7 +88,7 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
           {!hasHeader && (
             <label className="block">
               <span className="text-xs text-fg/50 mb-1 block">欄名（逗號分隔，依 CSV 欄序對應）</span>
-              <input className={inputCls} value={columns} onChange={(e) => setColumns(e.target.value)}
+              <Input inputSize="md" value={columns} onChange={(e) => setColumns(e.target.value)}
                 placeholder="id, name, qty" />
             </label>
           )}
@@ -118,4 +118,3 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
   );
 }
 
-const inputCls = "w-full bg-inset border border-fg/10 rounded px-2 py-1.5 text-sm outline-none focus:border-accent";

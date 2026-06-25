@@ -75,6 +75,7 @@ export default function RedisConsole({ connId, connName, initialDb = "0", onClos
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") { e.preventDefault(); run(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === "l" || e.key === "L")) { e.preventDefault(); setEntries([]); return; }
     if (e.key === "ArrowUp") {
       e.preventDefault();
       if (!history.length) return;
@@ -114,7 +115,7 @@ export default function RedisConsole({ connId, connName, initialDb = "0", onClos
     >
       <div className="flex-1 overflow-auto p-3 mono text-xs leading-relaxed" onClick={() => inputRef.current?.focus()}>
         {entries.length === 0 && (
-          <div className="text-fg/30">輸入 Redis 指令並按 Enter，如 GET key、HGETALL key、KEYS *。輸入 clear 清空。</div>
+          <div className="text-fg/30">輸入 Redis 指令並按 Enter，如 GET key、HGETALL key、KEYS *。輸入 clear 或按 Ctrl+L 清空。</div>
         )}
         {entries.map((en, i) => (
           <div key={i} className="mb-1.5">
