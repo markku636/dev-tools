@@ -281,7 +281,7 @@ export default function App() {
     const isConnected = !!active && connectedIds.has(active.id);
     return (
       <div className="h-7 bg-panel border-t border-fg/10 px-3 flex items-center text-xs text-fg/40 gap-4 min-w-0">
-        <span className="shrink-0">db-kit</span>
+        <span className="shrink-0">DB Kit</span>
         {active && (
           <span
             className="flex items-center gap-1.5 min-w-0"
@@ -394,7 +394,7 @@ function Toolbar({ onNewConnection, onBackup, canBackup, onEr, canEr, onHelp, on
   ];
   return (
     <div className="h-16 bg-bar border-b border-fg/10 flex items-center px-3 gap-1">
-      <div className="font-semibold text-fg/90 mr-4 pl-1">db-kit</div>
+      <div className="font-semibold text-fg/90 mr-4 pl-1">DB Kit</div>
       {tools.map((t) => (
         <button
           type="button"
