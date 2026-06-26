@@ -1,26 +1,46 @@
-mod agent;
+// slim CLI build（無 gui feature）只用到核心層的唯讀路徑，寫入 / DDL / restore 等方法在此 profile
+// 必然 unused；GUI build 仍會正常檢查 dead_code，故僅在非 gui 時靜音。
+#![cfg_attr(not(feature = "gui"), allow(dead_code))]
+
+// 核心層（GUI 與 CLI 共用，不依賴 Tauri）。
 mod backup;
-mod commands;
 mod conn_crypto;
 mod db;
 mod error;
 mod export;
 mod import;
 mod manager;
-mod scheduler;
 mod ssh;
 mod store;
+
+// CLI（唯讀查詢 + 匯出）。一直編譯；不依賴 Tauri，直接呼叫 manager / store / export / backup。
+pub mod cli;
+
+// 僅 GUI（Tauri）需要的模組。slim build（--no-default-features，無 gui feature）整段排除，
+// 連同 tauri / tauri-plugin-dialog 相依一起不被連入。
+#[cfg(feature = "gui")]
+mod agent;
+#[cfg(feature = "gui")]
+mod commands;
+#[cfg(feature = "gui")]
+mod scheduler;
 
 #[cfg(test)]
 mod it_tests;
 
+#[cfg(feature = "gui")]
 use std::sync::Arc;
 
+#[cfg(feature = "gui")]
 use commands::AppState;
+#[cfg(feature = "gui")]
 use manager::ConnectionManager;
+#[cfg(feature = "gui")]
 use parking_lot::Mutex;
+#[cfg(feature = "gui")]
 use tauri::{Manager, RunEvent, WindowEvent};
 
+#[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

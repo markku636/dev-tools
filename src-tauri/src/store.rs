@@ -3,11 +3,17 @@
 //! - 非 secret 欄位寫入 `<app_config_dir>/connections.json`（原子寫入：temp + rename）。
 //! - 密碼 / SSH 密碼 / SSH passphrase 一律存進 OS keychain，永不落地磁碟、永不回傳前端。
 //! - 連線時於後端從 keychain hydrate 回 `ConnectionConfig`。
+//!
+//! 路徑解析分兩條：GUI 透過 Tauri 的 `AppHandle::app_config_dir()`（gated `gui` feature）；
+//! CLI / headless 透過 `headless_config_dir()`（`dirs::config_dir()/<identifier>`）。兩者指向
+//! 同一目錄與同一 keychain service，故 CLI 與 GUI 共用同一份連線設定。實際 IO 收斂到 `*_in`
+//! 內層函式（吃 `&Path`），AppHandle 版本只是薄轉接。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "gui")]
 use tauri::{AppHandle, Manager};
 
 use crate::db::{ConnectionConfig, DbKind, SshAuthMethod};
@@ -123,30 +129,35 @@ impl PersistedConnection {
     }
 }
 
-// ---- 檔案讀寫 ----
+// ---- 設定目錄解析 ----
 
-fn config_path(app: &AppHandle) -> AppResult<PathBuf> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| AppError::Storage(format!("無法取得設定目錄：{e}")))?;
-    Ok(dir.join(CONNECTIONS_FILE))
+/// CLI / headless 模式的設定目錄：與 Tauri 的 `app_config_dir()` 同路徑
+/// （`dirs::config_dir()/<identifier>`），讓 CLI 與 GUI 共用同一份 connections.json + keychain。
+/// identifier 取自 `tauri.conf.json`（`dev.dbkit.app`），變更時需同步此處。
+pub fn headless_config_dir() -> AppResult<PathBuf> {
+    let base = dirs::config_dir()
+        .ok_or_else(|| AppError::Storage("無法取得使用者設定目錄".into()))?;
+    Ok(base.join("dev.dbkit.app"))
 }
 
-async fn ensure_dir(app: &AppHandle) -> AppResult<PathBuf> {
-    let dir = app
-        .path()
+#[cfg(feature = "gui")]
+fn app_config_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    app.path()
         .app_config_dir()
-        .map_err(|e| AppError::Storage(format!("無法取得設定目錄：{e}")))?;
-    tokio::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::Storage(format!("無法取得設定目錄：{e}")))
+}
+
+// ---- 檔案讀寫（path-based 內層，GUI 與 CLI 共用）----
+
+async fn ensure_dir_at(dir: &Path) -> AppResult<()> {
+    tokio::fs::create_dir_all(dir)
         .await
-        .map_err(|e| AppError::Storage(format!("建立設定目錄失敗：{e}")))?;
-    Ok(dir)
+        .map_err(|e| AppError::Storage(format!("建立設定目錄失敗：{e}")))
 }
 
 /// 載入全部已存連線。檔案不存在或解析失敗都回空清單（優雅降級）。
-pub async fn load_all(app: &AppHandle) -> AppResult<Vec<PersistedConnection>> {
-    let path = config_path(app)?;
+pub async fn load_all_in(dir: &Path) -> AppResult<Vec<PersistedConnection>> {
+    let path = dir.join(CONNECTIONS_FILE);
     match tokio::fs::read(&path).await {
         Ok(bytes) => match serde_json::from_slice::<ConnectionsFile>(&bytes) {
             Ok(f) => Ok(f.connections),
@@ -161,8 +172,8 @@ pub async fn load_all(app: &AppHandle) -> AppResult<Vec<PersistedConnection>> {
 }
 
 /// 原子寫入：先寫 `.tmp` 再 rename，避免中途崩潰損毀檔案。
-pub async fn save_all(app: &AppHandle, conns: &[PersistedConnection]) -> AppResult<()> {
-    let dir = ensure_dir(app).await?;
+pub async fn save_all_in(dir: &Path, conns: &[PersistedConnection]) -> AppResult<()> {
+    ensure_dir_at(dir).await?;
     let path = dir.join(CONNECTIONS_FILE);
     let tmp = dir.join(format!("{CONNECTIONS_FILE}.tmp"));
     let file = ConnectionsFile {
@@ -180,21 +191,15 @@ pub async fn save_all(app: &AppHandle, conns: &[PersistedConnection]) -> AppResu
     Ok(())
 }
 
-pub async fn upsert(app: &AppHandle, conn: PersistedConnection) -> AppResult<()> {
-    let mut all = load_all(app).await?;
+pub async fn upsert_in(dir: &Path, conn: PersistedConnection) -> AppResult<()> {
+    let mut all = load_all_in(dir).await?;
     all.retain(|c| c.id != conn.id);
     all.push(conn);
-    save_all(app, &all).await
+    save_all_in(dir, &all).await
 }
 
-// ---- 通用 JSON 讀寫（供排程器的 schedules.json / history.json 重用）----
-
-/// 讀取 app config 目錄下的 JSON 檔。檔案不存在回 `T::default()`。
-pub async fn read_json<T: DeserializeOwned + Default>(app: &AppHandle, file: &str) -> AppResult<T> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| AppError::Storage(format!("無法取得設定目錄：{e}")))?;
+/// 讀取設定目錄下的 JSON 檔。檔案不存在回 `T::default()`。
+pub async fn read_json_in<T: DeserializeOwned + Default>(dir: &Path, file: &str) -> AppResult<T> {
     let path = dir.join(file);
     match tokio::fs::read(&path).await {
         Ok(bytes) => serde_json::from_slice::<T>(&bytes)
@@ -204,9 +209,9 @@ pub async fn read_json<T: DeserializeOwned + Default>(app: &AppHandle, file: &st
     }
 }
 
-/// 原子寫入 app config 目錄下的 JSON 檔（temp + rename）。
-pub async fn write_json<T: Serialize>(app: &AppHandle, file: &str, value: &T) -> AppResult<()> {
-    let dir = ensure_dir(app).await?;
+/// 原子寫入設定目錄下的 JSON 檔（temp + rename）。
+pub async fn write_json_in<T: Serialize>(dir: &Path, file: &str, value: &T) -> AppResult<()> {
+    ensure_dir_at(dir).await?;
     let path = dir.join(file);
     let tmp = dir.join(format!("{file}.tmp"));
     let bytes = serde_json::to_vec_pretty(value)
@@ -220,19 +225,19 @@ pub async fn write_json<T: Serialize>(app: &AppHandle, file: &str, value: &T) ->
     Ok(())
 }
 
-pub async fn remove(app: &AppHandle, id: &str) -> AppResult<()> {
-    let mut all = load_all(app).await?;
+pub async fn remove_in(dir: &Path, id: &str) -> AppResult<()> {
+    let mut all = load_all_in(dir).await?;
     let before = all.len();
     all.retain(|c| c.id != id);
     if all.len() != before {
-        save_all(app, &all).await?;
+        save_all_in(dir, &all).await?;
     }
     Ok(())
 }
 
-/// 載入單一連線並補上密碼（供排程器 fire 時使用）。找不到回 `NotFound`。
-pub async fn load_connection(app: &AppHandle, id: &str) -> AppResult<ConnectionConfig> {
-    let all = load_all(app).await?;
+/// 載入單一連線並補上密碼（從 keychain hydrate）。找不到回 `NotFound`。
+pub async fn load_connection_in(dir: &Path, id: &str) -> AppResult<ConnectionConfig> {
+    let all = load_all_in(dir).await?;
     let p = all
         .into_iter()
         .find(|c| c.id == id)
@@ -245,6 +250,39 @@ pub async fn load_connection(app: &AppHandle, id: &str) -> AppResult<ConnectionC
         cfg.ssh_passphrase = kc_get(&ssh_passphrase_account(id)).unwrap_or_default();
     }
     Ok(cfg)
+}
+
+// ---- AppHandle 薄轉接（GUI 專用）----
+
+#[cfg(feature = "gui")]
+pub async fn load_all(app: &AppHandle) -> AppResult<Vec<PersistedConnection>> {
+    load_all_in(&app_config_dir(app)?).await
+}
+
+#[cfg(feature = "gui")]
+pub async fn upsert(app: &AppHandle, conn: PersistedConnection) -> AppResult<()> {
+    upsert_in(&app_config_dir(app)?, conn).await
+}
+
+#[cfg(feature = "gui")]
+pub async fn read_json<T: DeserializeOwned + Default>(app: &AppHandle, file: &str) -> AppResult<T> {
+    read_json_in(&app_config_dir(app)?, file).await
+}
+
+#[cfg(feature = "gui")]
+pub async fn write_json<T: Serialize>(app: &AppHandle, file: &str, value: &T) -> AppResult<()> {
+    write_json_in(&app_config_dir(app)?, file, value).await
+}
+
+#[cfg(feature = "gui")]
+pub async fn remove(app: &AppHandle, id: &str) -> AppResult<()> {
+    remove_in(&app_config_dir(app)?, id).await
+}
+
+/// 載入單一連線並補上密碼（供排程器 fire 時使用）。找不到回 `NotFound`。
+#[cfg(feature = "gui")]
+pub async fn load_connection(app: &AppHandle, id: &str) -> AppResult<ConnectionConfig> {
+    load_connection_in(&app_config_dir(app)?, id).await
 }
 
 // ---- keychain ----

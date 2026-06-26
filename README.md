@@ -48,6 +48,7 @@
 - **安全可靠** — 連線密碼存於 OS keychain（磁碟不落地）、SSH Tunnel（密碼／私鑰）+ host key TOFU 驗證、所有寫入以主鍵定位 + 全參數化綁定防注入。
 - **桌面級操作手感** — 儲存格直接編輯、右鍵選單、鍵盤導覽、多欄排序、欄寬拖曳、依值篩選、內容檢視器、即時尋找。
 - **內建 AI 助手** — 右側面板串接本機 Claude CLI（用你的 Claude 訂閱登入），串流回答資料庫問題、撰寫／優化 SQL，並可附帶目前連線的 schema 作上下文。
+- **附命令列工具 `dbk`** — 唯讀查詢 / 瀏覽 / 匯出 / 備份的 CLI，重用同一套連線與 keychain，可 `--no-default-features` 編成不連 Tauri 的精簡 binary，適合伺服器與 script 場景（見 [命令列工具](#命令列工具dbk-cli)）。
 - **完整工程實踐** — 後端以 Docker 真實五大資料庫做整合測試、前端純函式 vitest 覆蓋，經多輪對抗式自我審查修正安全與正確性問題（見 [CHANGELOG](./CHANGELOG.md)）。
 
 ## 功能特色
@@ -163,6 +164,38 @@ npm run tauri build
 ```bash
 docker run --name mysql-test -e MYSQL_ROOT_PASSWORD=test1234 -p 3306:3306 -d mysql:8
 ```
+
+## 命令列工具（`dbk` CLI）
+
+除了桌面 GUI，db-kit 另附一支 **`dbk` 命令列工具**——**唯讀查詢 + 匯出**，適合 SSH 進伺服器、寫 script、排程任務時用，不必開 GUI。它直接重用核心層（連線管理 / 匯出 / 備份 / 加密），**不經過 Tauri**，所以能 `--no-default-features` 編出一支**不連 Tauri 的精簡 binary**。
+
+```bash
+# 編譯精簡 CLI（不含 GUI / Tauri）
+cargo build --release --no-default-features --bin dbk
+# 產物：target/release/dbk(.exe)
+```
+
+**連線兩種來源**：沿用 GUI 已存的連線（`--conn <名稱或 id>`，讀同一份 connections.json + OS keychain），或用旗標臨時連線（`--kind mysql --host … --user …`，密碼可走環境變數 `DBKIT_PASSWORD` 避免出現在 argv）。輸出格式 `--format table|csv|json`。
+
+```bash
+# 用 GUI 已存的連線，跑一段唯讀查詢，輸出 CSV
+dbk --conn prod-mysql --format csv query "select id,name from users limit 20"
+
+# 臨時連線（密碼走環境變數），列出資料表
+DBKIT_PASSWORD=*** dbk --kind mysql --host 10.0.0.5 --user app db list
+dbk --conn prod-mysql table data orders --page 0 --page-size 50 --filter "status:=:paid" --sort "created_at:desc"
+
+# 匯出整表 / 轉儲整庫結構 / 備份
+dbk --conn prod-mysql export orders --to orders.csv --data-format csv --bom
+dbk --conn prod-mysql schema-dump > schema.sql
+dbk --conn prod-mysql backup mydb --to mydb.dump
+```
+
+**唯讀守門**：`query` / `explain` 只放行查詢類語句（`select` / `with` / `show` / `describe` / `explain` / `pragma` / `use` / `values` / `table`），偵測到寫入語句（`insert` / `update` / `delete` / `drop`…）直接擋下並回非零 exit code（逐 `;` 切句、跳過註解）。建議再搭配唯讀 DB 帳號作第二道防線。
+
+其餘子指令：`conn`（list / test / ping / 加密 export）、`table`（list / columns / data / info / ddl / indexes / foreign-keys）、`routine`、`search`、`column-stats`、`er-model`、`server-info`、`redis`（keys / key / slowlog / clients / big-keys）。完整清單 `dbk --help`。
+
+> 架構上 `tauri` / `tauri-plugin-dialog` 已改為 optional，藏在預設的 `gui` feature 後；GUI binary（`db-kit`）需要 `gui` feature，CLI binary（`dbk`）不需要。
 
 ## 打包 Windows 安裝檔
 

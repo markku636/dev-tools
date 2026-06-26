@@ -10,12 +10,24 @@ rust-version = "1.77"
 name = "db_kit_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# GUI 桌面程式（Tauri）。slim CLI build（--no-default-features）會略過此 bin。
+[[bin]]
+name = "db-kit"
+path = "src/main.rs"
+required-features = ["gui"]
+
+# 命令列工具（唯讀查詢 + 匯出）。不需 gui feature，--no-default-features 也能單獨編譯。
+[[bin]]
+name = "dbk"
+path = "src/bin/dbk.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
+# Tauri 改為 optional：藏在預設 `gui` feature 後，讓 CLI 能 --no-default-features 編出不連 Tauri 的精簡 binary。
+tauri = { version = "2", features = [], optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 # preserve_order：保留 JSON 物件鍵序（IndexMap）。否則 serde_json 預設 BTreeMap 會把鍵按字母排序，
 # 導致 MongoDB 多欄 sort（如 {"name":1,"age":-1}）被重排、排序優先序錯誤；JSON 匯出欄序也會亂。
@@ -32,9 +44,11 @@ parking_lot = "0.12"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 bigdecimal = "0.4"
+# CLI 參數解析（derive 指令樹；env 讓 --password 可吃環境變數 DBKIT_PASSWORD）。CLI 必備，不放在 gui feature 後。
+clap = { version = "4", features = ["derive", "env"] }
 # SSH Tunnel：純 Rust。用 ring 當 crypto backend（避免 aws-lc-sys 需要 NASM 才能在 Windows 編譯）。
 russh = { version = "0.61", default-features = false, features = ["ring", "flate2", "rsa"] }
-# 取 OS 設定目錄（SSH known-hosts 指紋存放位置）。
+# 取 OS 設定目錄（SSH known-hosts 指紋存放位置；CLI 亦以此推導與 GUI 相同的設定目錄）。
 dirs = "6"
 # 連線設定加密匯出 / 匯入（含密碼；passphrase 經 Argon2 派生金鑰 + AES-256-GCM）。
 aes-gcm = "0.10"
@@ -52,4 +66,7 @@ keyring = { version = "3", features = ["apple-native"] }
 keyring = { version = "3", features = ["sync-secret-service"] }
 
 [features]
-custom-protocol = ["tauri/custom-protocol"]
+default = ["gui"]
+# gui：啟用 Tauri 桌面程式（commands / agent / scheduler / run()）。預設開啟。
+gui = ["dep:tauri", "dep:tauri-plugin-dialog"]
+custom-protocol = ["gui", "tauri/custom-protocol"]
