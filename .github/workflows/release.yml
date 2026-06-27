@@ -1,6 +1,6 @@
 name: release
 
-# 推送 v 開頭的版本標籤（例：v0.1.4）時，自動打包 Windows 安裝檔並建立 GitHub Release。
+# 推送 v 開頭的版本標籤（例：v0.1.4）時，自動打包 Windows + Linux 安裝檔並建立 GitHub Release。
 # 用法：
 #   git tag v0.1.4
 #   git push origin v0.1.4
@@ -15,11 +15,38 @@ permissions:
   contents: write   # 建立 Release / 上傳安裝檔需要
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false   # 一個平台失敗不影響另一個平台繼續打包
+      matrix:
+        include:
+          # Windows：產出 .msi 與 .exe(NSIS)
+          - platform: windows-latest
+            label: windows
+          # Linux：產出 .deb / .rpm / .AppImage（用 22.04 以較舊 glibc 換取 AppImage 更廣的相容性）
+          - platform: ubuntu-22.04
+            label: linux
+
+    runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # --- Linux 系統依賴（Tauri v2 需 webkit2gtk-4.1；AppImage 需 patchelf）---
+      - name: Install Linux system deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl wget file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -39,7 +66,8 @@ jobs:
         run: npm ci
 
       # tauri-action 會跑 beforeBuildCommand（npm run build）→ tauri build，
-      # 然後依 tagName 建立 / 更新 Release 並上傳 .msi 與 .exe(NSIS) 安裝檔。
+      # 然後依 tagName 建立 / 更新同一個 Release 並上傳該平台的安裝檔
+      # （Windows: .msi/.exe；Linux: .deb/.rpm/.AppImage）。
       - name: Build & release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -47,6 +75,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "db-kit ${{ github.ref_name }}"
-          releaseBody: "見 CHANGELOG.md。下載下方對應的 .exe（NSIS）或 .msi 安裝檔。"
+          releaseBody: "見 CHANGELOG.md。Windows 下載 .exe（NSIS）或 .msi；Linux 下載 .AppImage（免安裝）、.deb（Debian/Ubuntu）或 .rpm（Fedora/RHEL）。"
           releaseDraft: false
           prerelease: false
