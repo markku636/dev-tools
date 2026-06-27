@@ -41,7 +41,7 @@
 - **`dbk` CLI 同樣跨平台** — 可在 Linux 伺服器上以 `--no-default-features` 編出不連 Tauri 的精簡 binary，SSH 進機器即可查詢 / 匯出 / 備份。
 - **輕量** — Tauri 直接用系統內建 WebView（Windows 為 WebView2、macOS 為 WKWebView、Linux 為 WebKitGTK），不內嵌 Chromium，安裝檔小、記憶體佔用約為 Electron 同類產品的十分之一。
 
-> 目前 GitHub Releases 提供預編譯的 **Windows** 安裝檔；**macOS / Linux** 請依 [從原始碼建置](#從原始碼建置) 自行 `npm run tauri build`（同一指令，產物為各平台對應格式）。
+> GitHub Releases 已提供 **Windows / macOS / Linux** 三平台預編譯安裝檔（由 GitHub Actions 自動打包）。macOS 同時提供 Apple Silicon 與 Intel 版本；安裝檔皆未付費簽章，首次開啟需依下方步驟略過系統警示。也可依 [從原始碼建置](#從原始碼建置) 自行 `npm run tauri build`。
 
 ## 畫面預覽
 
@@ -66,8 +66,11 @@
 | 平台 | 安裝檔 | 安裝方式 |
 |------|--------|----------|
 | **Windows** 10 / 11 | `db-kit_x.y.z_x64-setup.exe`（NSIS）<br>或 `db-kit_x.y.z_x64_en-US.msi`（MSI） | 下載後雙擊執行，依精靈完成安裝 |
-| **macOS** | 從原始碼建置（見 [從原始碼建置](#從原始碼建置)） | — |
-| **Linux** | 從原始碼建置（見 [從原始碼建置](#從原始碼建置)） | — |
+| **macOS** Apple Silicon（M 系列） | `db-kit_x.y.z_aarch64.dmg` | 開啟 .dmg，把 DB Kit 拖進「應用程式」 |
+| **macOS** Intel | `db-kit_x.y.z_x64.dmg` | 開啟 .dmg，把 DB Kit 拖進「應用程式」 |
+| **Linux** Debian / Ubuntu | `db-kit_x.y.z_amd64.deb` | `sudo dpkg -i db-kit_*.deb` 或用軟體中心安裝 |
+| **Linux** Fedora / RHEL | `db-kit-x.y.z-1.x86_64.rpm` | `sudo rpm -i db-kit-*.rpm` |
+| **Linux** 免安裝 | `db-kit_x.y.z_amd64.AppImage` | `chmod +x *.AppImage` 後直接執行 |
 
 **Windows 安裝步驟**
 
@@ -77,7 +80,20 @@
 
 > **需要 WebView2 Runtime**：Windows 11 已內建、Windows 10 多數也已隨更新安裝；若缺少，安裝檔會自動提示下載。
 
-想自己打包安裝檔或在 macOS / Linux 使用，請見下方 [從原始碼建置](#從原始碼建置)。
+**macOS 安裝步驟**
+
+1. 依晶片下載對應 `.dmg`：Apple Silicon（M1/M2/M3…）選 `aarch64`，Intel 選 `x64`。
+2. 開啟 .dmg，把 **DB Kit** 拖進「應用程式」資料夾。
+3. 首次開啟因安裝檔**未經 Apple 簽章 / 公證**，會跳「無法驗證開發者」：請對 App 圖示按**右鍵 →「打開」→「打開」**即可（只需一次）。
+   - 若仍被擋，可在終端機執行：`xattr -dr com.apple.quarantine "/Applications/DB Kit.app"`。
+
+**Linux 安裝步驟**
+
+- Debian / Ubuntu：`sudo dpkg -i db-kit_*.deb`（缺依賴時補 `sudo apt-get -f install`）。
+- Fedora / RHEL：`sudo rpm -i db-kit-*.rpm`。
+- 任意發行版（免安裝）：下載 `.AppImage`，`chmod +x` 後直接執行。
+
+想自己打包安裝檔，請見下方 [從原始碼建置](#從原始碼建置)。
 
 ## 快速上手
 
@@ -273,10 +289,10 @@ powershell -ExecutionPolicy Bypass -File .\build-installer.ps1
 
 > 注意：Tauri 需要 WebView2 Runtime（Windows 11 內建，Windows 10 多數已有）。
 
-**自動發佈（GitHub Actions）**：推送 `v` 開頭的版本標籤即會在雲端打包 Windows 安裝檔並建立對應的 [Release](https://github.com/markku636/db-kit/releases)（見 [`.github/workflows/release.yml`](./.github/workflows/release.yml)）：
+**自動發佈（GitHub Actions）**：推送 `v` 開頭的版本標籤即會在雲端**同時打包 Windows / macOS（Intel + Apple Silicon）/ Linux** 安裝檔並建立對應的 [Release](https://github.com/markku636/db-kit/releases)（見 [`.github/workflows/release.yml`](./.github/workflows/release.yml)）：
 
 ```bash
-git tag v0.1.4 && git push origin v0.1.4
+git tag v0.1.6 && git push origin v0.1.6
 ```
 
 ## 授權

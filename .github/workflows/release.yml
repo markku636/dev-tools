@@ -20,12 +20,26 @@ jobs:
       fail-fast: false   # 一個平台失敗不影響另一個平台繼續打包
       matrix:
         include:
+          # macOS Apple Silicon（M 系列）：產出 aarch64 的 .dmg / .app（未簽章）
+          - platform: macos-latest
+            label: macos-arm
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          # macOS Intel：產出 x86_64 的 .dmg / .app（未簽章；macos-13 為 Intel runner）
+          - platform: macos-13
+            label: macos-intel
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
           # Windows：產出 .msi 與 .exe(NSIS)
           - platform: windows-latest
             label: windows
+            target: ""
+            args: ""
           # Linux：產出 .deb / .rpm / .AppImage（用 22.04 以較舊 glibc 換取 AppImage 更廣的相容性）
           - platform: ubuntu-22.04
             label: linux
+            target: ""
+            args: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -56,6 +70,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # macOS 需明確加上對應架構的 Rust target 才能交叉編譯 Intel / Apple Silicon
+      - name: Add Rust target (macOS)
+        if: ${{ matrix.target != '' }}
+        run: rustup target add ${{ matrix.target }}
+
       - name: Cache cargo build
         uses: swatinem/rust-cache@v2
         with:
@@ -66,7 +85,8 @@ jobs:
 
       # tauri-action 會跑 beforeBuildCommand（npm run build）→ tauri build，
       # 然後依 tagName 建立 / 更新同一個 Release 並上傳該平台的安裝檔
-      # （Windows: .msi/.exe；Linux: .deb/.rpm/.AppImage）。
+      # （Windows: .msi/.exe；macOS: .dmg；Linux: .deb/.rpm/.AppImage）。
+      # macOS 透過 matrix.args 指定 --target 交叉編出 Intel / Apple Silicon 兩版。
       - name: Build & release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -74,6 +94,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "db-kit ${{ github.ref_name }}"
-          releaseBody: "見 CHANGELOG.md。Windows 下載 .exe（NSIS）或 .msi；Linux 下載 .AppImage（免安裝）、.deb（Debian/Ubuntu）或 .rpm（Fedora/RHEL）。"
+          releaseBody: "見 CHANGELOG.md。Windows 下載 .exe（NSIS）或 .msi；macOS 下載 .dmg（Apple Silicon 選 aarch64、Intel 選 x64；未簽章，首次開啟請右鍵→開啟）；Linux 下載 .AppImage（免安裝）、.deb（Debian/Ubuntu）或 .rpm（Fedora/RHEL）。"
           releaseDraft: false
           prerelease: false
+          args: ${{ matrix.args }}
