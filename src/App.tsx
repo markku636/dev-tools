@@ -394,7 +394,10 @@ function Toolbar({ onNewConnection, onBackup, canBackup, onEr, canEr, onHelp, on
   ];
   return (
     <div className="h-16 bg-bar border-b border-fg/10 flex items-center px-3 gap-1">
-      <div className="font-semibold text-fg/90 mr-4 pl-1">DB Kit</div>
+      <div className="font-semibold text-fg/90 mr-4 pl-1 flex items-baseline gap-1.5">
+        <span>DB Kit</span>
+        <span className="text-[11px] font-normal text-fg/40 tabular-nums" title={`版本 ${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
+      </div>
       {tools.map((t) => (
         <button
           type="button"

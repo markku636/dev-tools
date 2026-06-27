@@ -221,13 +221,29 @@ Write-Step "開始 tauri build（第一次會編譯 Rust，請耐心等候）"
 npm run tauri build
 Assert-LastExit "tauri build"
 
-# --- 完成 ---
+# --- 完成：把安裝檔收整到帶版號的 release 目錄 ---
+# Tauri 預設把產物丟在 target\release\bundle（且 target 可能已被改到不含空白處，見 4.9），
+# 路徑深、又散在 msi\ 與 nsis\ 兩個子夾。這裡統一複製到「專案內 release\v<版本>\」，
+# 檔名本身已含版號（DB Kit_<版本>_x64-setup.exe / DB Kit_<版本>_x64_en-US.msi），
+# 一眼可辨、方便發佈與封存。
 $bundleDir = Join-Path $targetDir "release\bundle"   # target 目錄可能已被改到不含空白處（見 4.9）
 Write-Step "打包完成"
 if (Test-Path $bundleDir) {
-    Write-Host "安裝檔位於：" -ForegroundColor Green
-    Get-ChildItem -Recurse -Path $bundleDir -Include *.msi, *.exe |
-        ForEach-Object { Write-Host "  $($_.FullName)" -ForegroundColor Green }
+    $version    = Get-CurrentVersion
+    $releaseDir = Join-Path $PSScriptRoot "release\v$version"
+    New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+
+    $artifacts = Get-ChildItem -Recurse -Path $bundleDir -Include *.msi, *.exe
+    if ($artifacts) {
+        foreach ($a in $artifacts) {
+            Copy-Item -Path $a.FullName -Destination $releaseDir -Force
+        }
+        Write-Host "安裝檔（v$version）已輸出到：$releaseDir" -ForegroundColor Green
+        Get-ChildItem -Path $releaseDir -Include *.msi, *.exe -Recurse |
+            ForEach-Object { Write-Host "  $($_.Name)  ($([math]::Round($_.Length/1MB,1)) MB)" -ForegroundColor Green }
+    } else {
+        Write-Host "bundle 目錄存在但找不到 .msi / .exe，請檢查上方建置輸出。" -ForegroundColor Red
+    }
 } else {
     Write-Host "找不到 bundle 目錄，請檢查上方建置輸出是否有錯誤。" -ForegroundColor Red
 }

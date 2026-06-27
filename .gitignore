@@ -5,6 +5,8 @@ dist/
 dist-ssr/
 # tauri / rust
 src-tauri/target/
+# 打包輸出（build-installer.ps1 收整的帶版號安裝檔）
+release/
 # env & secrets
 .env
 .env.local

@@ -41,6 +41,60 @@
 | **ER 圖** — 外鍵關係 · 可拖曳表卡 · 佈局記憶 | **Redis** — 命名空間鍵樹 · 結構編輯 · INFO 狀態 |
 | ![ER 圖](docs/screenshots/03-er-diagram.png) | ![Redis 檢視](docs/screenshots/04-redis.png) |
 
+## 下載安裝
+
+<p align="center">
+  <a href="https://github.com/markku636/db-kit/releases/latest">
+    <img alt="下載最新版" src="https://img.shields.io/github/v/release/markku636/db-kit?label=%E4%B8%8B%E8%BC%89%E6%9C%80%E6%96%B0%E7%89%88&style=for-the-badge&color=22c55e">
+  </a>
+</p>
+
+前往 **[Releases 頁面下載最新版本 ⬇️](https://github.com/markku636/db-kit/releases/latest)**，依作業系統選擇對應安裝檔：
+
+| 平台 | 安裝檔 | 安裝方式 |
+|------|--------|----------|
+| **Windows** 10 / 11 | `db-kit_x.y.z_x64-setup.exe`（NSIS）<br>或 `db-kit_x.y.z_x64_en-US.msi`（MSI） | 下載後雙擊執行，依精靈完成安裝 |
+| **macOS** | 從原始碼建置（見 [從原始碼建置](#從原始碼建置)） | — |
+| **Linux** | 從原始碼建置（見 [從原始碼建置](#從原始碼建置)） | — |
+
+**Windows 安裝步驟**
+
+1. 到 [Releases](https://github.com/markku636/db-kit/releases/latest) 下載 `.exe`（建議）或 `.msi`。
+2. 雙擊執行；若 SmartScreen 跳出警告，點「更多資訊」→「仍要執行」（安裝檔未付費簽章所致）。
+3. 完成後從開始選單啟動 **db-kit**。
+
+> **需要 WebView2 Runtime**：Windows 11 已內建、Windows 10 多數也已隨更新安裝；若缺少，安裝檔會自動提示下載。
+
+想自己打包安裝檔或在 macOS / Linux 使用，請見下方 [從原始碼建置](#從原始碼建置)。
+
+## 快速上手
+
+安裝後第一次使用，三步驟即可連上資料庫：
+
+1. **新增連線** — 左上角點 **「＋ 新增連線」**，選擇資料庫類型（MySQL / PostgreSQL / SQLite / MongoDB / Redis）。
+2. **填入連線資訊** — 輸入主機、連接埠、帳號、密碼（或選 SQLite 檔案）。需要時可在 **SSH Tunnel** 分頁設定跳板。先按 **「測試連線」** 確認可連，再 **儲存**。
+3. **開始操作** — 連線會出現在左側樹狀清單，展開資料庫 → 雙擊資料表即可瀏覽 / 編輯資料；上方分頁可開查詢編輯器、ER 圖等。
+
+> 密碼會存進作業系統的 keychain（不落地到磁碟）。連線設定可隨時在連線上按右鍵「編輯 / 複製 / 刪除」。
+
+**沒有現成資料庫可連？** 用 Docker 起一個測試用 MySQL：
+
+```bash
+docker run --name mysql-test -e MYSQL_ROOT_PASSWORD=test1234 -p 3306:3306 -d mysql:8
+# 之後在 db-kit 新增連線：host 127.0.0.1、port 3306、user root、password test1234
+```
+
+常用操作速覽：
+
+| 想做的事 | 怎麼做 |
+|----------|--------|
+| 編輯資料 | 雙擊儲存格直接改 → 按 **✓** 套用（以主鍵定位寫回） |
+| 篩選 / 排序 | 點欄位標題排序、Shift+點擊多欄；工具列開多欄複合篩選 |
+| 跑 SQL | 開「查詢編輯器」分頁，**Ctrl+Enter** 執行（可只執行反白段） |
+| 匯出 / 匯入 | 資料格工具列匯出 CSV / JSON / SQL…；CSV 可匯入資料表 |
+| 看表關聯 | 開「ER 圖」分頁，拖曳表卡、佈局自動記憶 |
+| 問 AI | 右側面板串接本機 Claude CLI，可附帶目前連線 schema |
+
 ## ✨ 亮點
 
 - **一站式五大資料庫** — MySQL · PostgreSQL · SQLite · MongoDB · Redis，全部可實際連線，共用同一套連線樹、資料格與快捷鍵。
@@ -137,33 +191,30 @@
 - **優雅關閉**：應用結束時 drain 所有連線池（RAII / Drop 保底）
 - **連線數監控**：每連線回報 in-use / idle 狀態
 
-## 開發環境需求
+## 從原始碼建置
+
+想自行修改、貢獻，或在 macOS / Linux 上使用，可從原始碼建置。
+
+**環境需求**
 
 - [Rust](https://rustup.rs/) (stable)
 - [Node.js](https://nodejs.org/) 18+
 - Tauri 系統依賴：見 <https://tauri.app/start/prerequisites/>
 
-## 開始開發
+**開發與打包**
 
 ```bash
 # 安裝前端依賴
 npm install
 
-# 開發模式（同時起前端與 Tauri）
+# 開發模式（同時起前端與 Tauri，支援熱重載）
 npm run tauri dev
 
-# 打包
+# 打包成目前平台的安裝檔
 npm run tauri build
 ```
 
-### 測試 MySQL 連線
-
-啟動後在 UI 左上點「新增連線」，填入 MySQL 連線資訊並測試。
-或可先用 Docker 起一個測試用 MySQL：
-
-```bash
-docker run --name mysql-test -e MYSQL_ROOT_PASSWORD=test1234 -p 3306:3306 -d mysql:8
-```
+打包產物位於 `src-tauri/target/release/bundle/`（依平台為 `.msi` / `.exe` / `.dmg` / `.AppImage` / `.deb`）。
 
 ## 命令列工具（`dbk` CLI）
 
@@ -208,6 +259,12 @@ powershell -ExecutionPolicy Bypass -File .\build-installer.ps1
 完成後安裝檔位於 `src-tauri\target\release\bundle\`（`msi\` 與 `nsis\` 子目錄）。
 
 > 注意：Tauri 需要 WebView2 Runtime（Windows 11 內建，Windows 10 多數已有）。
+
+**自動發佈（GitHub Actions）**：推送 `v` 開頭的版本標籤即會在雲端打包 Windows 安裝檔並建立對應的 [Release](https://github.com/markku636/db-kit/releases)（見 [`.github/workflows/release.yml`](./.github/workflows/release.yml)）：
+
+```bash
+git tag v0.1.4 && git push origin v0.1.4
+```
 
 ## 授權
 

@@ -1,0 +1,52 @@
+name: release
+
+# 推送 v 開頭的版本標籤（例：v0.1.4）時，自動打包 Windows 安裝檔並建立 GitHub Release。
+# 用法：
+#   git tag v0.1.4
+#   git push origin v0.1.4
+# 也可在 Actions 頁面手動觸發（workflow_dispatch），但需自行帶 tag 才會發佈。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 建立 Release / 上傳安裝檔需要
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      # tauri-action 會跑 beforeBuildCommand（npm run build）→ tauri build，
+      # 然後依 tagName 建立 / 更新 Release 並上傳 .msi 與 .exe(NSIS) 安裝檔。
+      - name: Build & release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "db-kit ${{ github.ref_name }}"
+          releaseBody: "見 CHANGELOG.md。下載下方對應的 .exe（NSIS）或 .msi 安裝檔。"
+          releaseDraft: false
+          prerelease: false
