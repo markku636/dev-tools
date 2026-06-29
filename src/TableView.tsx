@@ -12,7 +12,7 @@ import {
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard, useModalCount, useModalOverlay } from "./ui";
-import { quoteIdent, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rangeStats, buildInClause, TYPE_PRESETS } from "./sql";
+import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rangeStats, buildInClause, TYPE_PRESETS } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import RedisKeyTree from "./RedisKeyTree";
@@ -1545,6 +1545,12 @@ function DataPane({ tab }: { tab: OpenTab }) {
                 ["複製整欄（本頁）", () => copyToClipboard(data.rows.map((_, ri) => cellValue(ri, colMenu.ci) ?? "").join("\n"), "已複製整欄")],
                 ...(isSqlKind && connKind ? [["複製整欄為 IN(...)（本頁）", () => copyToClipboard(buildInClause(connKind, colMenu.col, data.rows.map((_, ri) => cellValue(ri, colMenu.ci))), "已複製 IN 子句")] as [string, () => void]] : []),
                 ...(isSqlKind ? [["欄位統計（總數/非空/相異）", () => colStats(colMenu.col)] as [string, () => void]] : []),
+                ...(isSqlKind && connKind ? [["相異值分布（Top 50）", () => {
+                  const qc = quoteIdent(connKind, colMenu.col);
+                  const sql = `SELECT ${qc}, COUNT(*) AS n\nFROM ${qualifiedName(connKind, tab.database, tab.table)}\nGROUP BY ${qc}\nORDER BY n DESC\nLIMIT 50;`;
+                  useStore.getState().setActive(tab.connId);
+                  useStore.getState().requestQuery(sql);
+                }] as [string, () => void]] : []),
                 ["隱藏此欄", () => hideColumn(colMenu.col)],
                 ...(hidden.length ? [["顯示所有欄", () => showAllColumns()] as [string, () => void]] : []),
               ] as [string, () => void][]

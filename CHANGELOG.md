@@ -1,5 +1,11 @@
 # Changelog
 
+## 欄位相異值分布（資料剖析）
+
+資料表欄位標題右鍵新增「**相異值分布（Top 50）**」：一鍵產生 `GROUP BY 該欄 ORDER BY 筆數` 的查詢並帶入編輯器，快速看「這欄各值各有幾筆」——找熱門值 / 髒資料 / 列舉值很實用。
+
+> 驗證：沿用 `quoteIdent` / `qualifiedName` 組查詢、`requestQuery` 帶入編輯器；前端 `tsc` + `eslint` + `vite build` 綠燈、vitest 176 項全通過。
+
 ## 資料比對 / 同步（致敬 Navicat Data Synchronization）
 
 資料表右鍵新增「**資料比對 / 同步…**」：以主鍵比對來源與目標兩表的資料，算出讓目標與來源一致所需的 **INSERT / UPDATE / DELETE**，產生同步 DML 供檢視後執行（跨連線 / 跨庫）。
