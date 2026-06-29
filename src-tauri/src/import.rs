@@ -199,13 +199,20 @@ async fn import_rows(
         return Err(AppError::Query("沒有任何資料列".to_string()));
     }
 
-    // 決定欄名。
-    let columns: Vec<String> = if opts.has_header {
-        rows.remove(0)
+    // 決定欄名。has_header 時先吃掉表頭列；欄名以 opts.columns 覆蓋為優先（致敬 Navicat 匯入欄位對應，
+    // 可把不一致的檔案表頭對齊到目標欄位），否則用表頭列；無表頭又無覆蓋則報錯。
+    let header_row = if opts.has_header && !rows.is_empty() {
+        Some(rows.remove(0))
     } else {
-        opts.columns
-            .clone()
-            .ok_or_else(|| AppError::Query("未提供欄名（無表頭時必填 columns）".to_string()))?
+        None
+    };
+    let override_cols = opts.columns.clone().filter(|c| !c.is_empty());
+    let columns: Vec<String> = match (override_cols, header_row) {
+        (Some(over), _) => over,
+        (None, Some(header)) => header,
+        (None, None) => {
+            return Err(AppError::Query("未提供欄名（無表頭時必填 columns）".to_string()))
+        }
     };
     if columns.is_empty() {
         return Err(AppError::Query("欄名為空".to_string()));

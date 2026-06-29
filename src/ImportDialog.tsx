@@ -16,15 +16,19 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
   const [hasHeader, setHasHeader] = useState(true);
   const [emptyAsNull, setEmptyAsNull] = useState(true);
   const [stopOnError, setStopOnError] = useState(false);
+  // 重新指定欄名（覆蓋檔案表頭）：把不一致的檔案欄名對齊到目標表欄位（致敬 Navicat 匯入欄位對應）。
+  const [overrideNames, setOverrideNames] = useState(false);
   const [columns, setColumns] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
 
   const run = async () => {
     if (busy) return; // 防重入：開檔對話框期間避免重複觸發
-    const cols = hasHeader ? null : columns.split(",").map((c) => c.trim()).filter(Boolean);
-    if (!hasHeader && (!cols || cols.length === 0)) {
-      toast.error("無表頭時請先填欄名（逗號分隔）");
+    // 需要自訂欄名：無表頭，或勾選「重新指定欄名」覆蓋表頭。
+    const useCols = !hasHeader || overrideNames;
+    const cols = useCols ? columns.split(",").map((c) => c.trim()).filter(Boolean) : null;
+    if (useCols && (!cols || cols.length === 0)) {
+      toast.error(overrideNames ? "請先填要套用的欄名（逗號分隔）" : "無表頭時請先填欄名（逗號分隔）");
       return;
     }
     const path = await pickOpenFile([
@@ -93,9 +97,15 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
             <input type="checkbox" checked={hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
             第一列為欄名
           </label>
-          {!hasHeader && (
+          {hasHeader && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input type="checkbox" checked={overrideNames} onChange={(e) => setOverrideNames(e.target.checked)} />
+              重新指定欄名（覆蓋檔案表頭，對齊到目標欄位）
+            </label>
+          )}
+          {(!hasHeader || overrideNames) && (
             <label className="block">
-              <span className="text-xs text-fg/50 mb-1 block">欄名（逗號分隔，依 CSV 欄序對應）</span>
+              <span className="text-xs text-fg/50 mb-1 block">欄名（逗號分隔，依檔案欄序對應目標欄位）</span>
               <Input inputSize="md" value={columns} onChange={(e) => setColumns(e.target.value)}
                 placeholder="id, name, qty" />
             </label>

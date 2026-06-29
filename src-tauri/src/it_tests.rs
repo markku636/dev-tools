@@ -1841,3 +1841,40 @@ async fn transfer_auto_creates_target_table() {
     mgr.disconnect(id).await;
     let _ = std::fs::remove_file(dbfile);
 }
+
+/// CSV 匯入欄名覆蓋（致敬 Navicat 欄位對應）：has_header=true 時跳過表頭，但以 columns 覆蓋欄名，
+/// 把不一致的檔案表頭（x,y）對齊到目標欄位（id,name）。
+#[tokio::test]
+async fn import_csv_column_override() {
+    let dbfile = format!("dbkit_import_override_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let _ = std::fs::remove_file(dbfile);
+    let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
+    let mgr = crate::manager::ConnectionManager::new();
+    mgr.connect(c.clone()).await.unwrap();
+    let id = c.id.as_str();
+    mgr.query(id, "CREATE TABLE imp (id INTEGER PRIMARY KEY, name TEXT)").await.unwrap();
+
+    // 檔案表頭是 x,y（與目標欄位不符）；以 columns 覆蓋成 id,name，且仍跳過表頭列。
+    let csv = "x,y\n1,a\n2,b";
+    let opts = crate::import::ImportOptions {
+        delimiter: None,
+        has_header: true,
+        empty_as_null: true,
+        columns: Some(vec!["id".into(), "name".into()]),
+        stop_on_error: false,
+    };
+    let res = crate::import::import_csv(&mgr, id, "main", "imp", csv, &opts).await.unwrap();
+    assert_eq!(res.imported, 2, "應匯入 2 列（表頭被跳過），錯誤：{:?}", res.errors);
+    assert_eq!(res.failed, 0);
+
+    let pd = mgr
+        .table_data(id, "main", "imp", &dq(vec![], vec![Sort { column: "id".into(), dir: SortDir::Asc }]))
+        .await
+        .unwrap();
+    assert_eq!(pd.total_rows, 2);
+    assert_eq!(pd.rows[0][col_at(&pd.columns, "name")].as_deref(), Some("a"));
+
+    mgr.disconnect(id).await;
+    let _ = std::fs::remove_file(dbfile);
+}
