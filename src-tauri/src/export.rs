@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::DataQuery;
+use crate::db::{DataQuery, Sort, SortDir};
 use crate::error::{AppError, AppResult};
 use crate::manager::ConnectionManager;
 
@@ -63,12 +63,29 @@ pub async fn export(
     let mut rows: Vec<Vec<Option<String>>> = Vec::new();
     let mut page: u32 = 0;
 
+    // 多頁匯出（all_rows）且呼叫端未指定排序時，分頁順序不定會跨頁重複 / 漏列。
+    // 探一次主鍵作穩定排序鍵（無主鍵則用全部欄位）；單頁匯出或已有排序則沿用呼叫端設定。
+    let sorts: Vec<Sort> = if opts.all_rows && query.sorts.is_empty() {
+        let probe = manager
+            .table_data(
+                id,
+                database,
+                table,
+                &DataQuery { page: 0, page_size: 1, filters: query.filters.clone(), sorts: vec![], match_any: query.match_any },
+            )
+            .await?;
+        let cols = if probe.primary_key.is_empty() { probe.columns } else { probe.primary_key };
+        cols.into_iter().map(|c| Sort { column: c, dir: SortDir::Asc }).collect()
+    } else {
+        query.sorts.clone()
+    };
+
     loop {
         let q = DataQuery {
             page,
             page_size: PAGE_SIZE,
             filters: query.filters.clone(),
-            sorts: query.sorts.clone(),
+            sorts: sorts.clone(),
             match_any: query.match_any,
         };
         let pd = manager.table_data(id, database, table, &q).await?;
