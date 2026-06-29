@@ -32,6 +32,7 @@ import DataDictionary from "./DataDictionary";
 import DataGenerator from "./DataGenerator";
 import QueryBuilder from "./QueryBuilder";
 import TransferDialog from "./TransferDialog";
+import { loadConnColors, persistConnColors, setConnColor, CONN_COLOR_PALETTE } from "./connColors";
 import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile, pickOpenFile, useEscToClose } from "./ui";
 import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
@@ -622,6 +623,10 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
   const [connecting, setConnecting] = useState<Set<string>>(new Set());
   // 右鍵選單（連線節點）
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // 連線色標（致敬 Navicat connection color）：per-連線 顏色，localStorage 持久化。
+  const [connColors, setConnColors] = useState(loadConnColors);
+  const applyConnColor = (id: string, color: string) =>
+    setConnColors((m) => { const next = setConnColor(m, id, color); persistConnColors(next); return next; });
   // 右鍵選單（Redis DB 節點）
   const [dbMenu, setDbMenu] = useState<{ connId: string; db: string; x: number; y: number } | null>(null);
   // Redis 伺服器狀態面板
@@ -1392,6 +1397,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
                 selectNode({ type: "connection", connId: c.id });
                 setMenu({ id: c.id, x: e.clientX, y: e.clientY });
               }}
+              style={connColors[c.id] ? { boxShadow: `inset 3px 0 0 ${connColors[c.id]}` } : undefined}
               className={`group flex items-center gap-2 px-3 py-1.5 cursor-pointer ${
                 activeId === c.id ? "relative bg-accent/12 before:content-[''] before:absolute before:left-0 before:inset-y-0 before:w-[2px] before:bg-accent" : "hover:bg-fg/5"
               }`}
@@ -1650,6 +1656,23 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
                 {label}
               </button>
             ))}
+            {/* 連線色標：選色即標記（致敬 Navicat connection color），用以區分環境。 */}
+            <div className="border-t border-fg/10 mt-1 pt-1.5 px-3 pb-1">
+              <div className="text-[11px] text-fg/40 mb-1">顏色標記</div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {CONN_COLOR_PALETTE.map((p) => {
+                  const active = (connColors[menu.id] ?? "") === p.value;
+                  return (
+                    <button key={p.name} type="button" title={p.name}
+                      onClick={() => { applyConnColor(menu.id, p.value); setMenu(null); }}
+                      className={`w-4 h-4 rounded-full border ${active ? "ring-2 ring-accent ring-offset-1 ring-offset-elevated" : "border-fg/20"} ${p.value ? "" : "grid place-items-center"}`}
+                      style={p.value ? { background: p.value } : undefined}>
+                      {!p.value && <Icon icon={X} size={10} className="text-fg/50" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </>
       )}

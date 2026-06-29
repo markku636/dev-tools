@@ -1,5 +1,15 @@
 # Changelog
 
+## 連線色標（Connection Color，致敬 Navicat）
+
+給連線標上顏色以一眼區分 **正式 / 測試 / 開發** 等環境，降低「在正式環境誤操作」的風險。
+
+> 驗證：色標存取抽為 `connColors.ts` 純函式 + 2 項 vitest（共 138 項全通過）；前端 `tsc` + `eslint` + `vite build` 綠燈。純前端 localStorage，與後端連線設定 / keychain 解耦。
+
+- **連線右鍵選單底部新增 10 色色盤**（含「無」清除）：選色即標記，當前色以外環高亮。
+- **側欄連線列顯示色條**（左側 3px inset 色條），與選取的 accent 條並存、不位移版面。
+- 色標 per-連線 持久化於 localStorage（`db-kit:connColors`），重載沿用。
+
 ## 視覺化查詢建構器：HAVING 群組後篩選
 
 查詢建構器補上 **HAVING** 子句——以聚合結果篩選分組（如 `COUNT(id) > 1`、`SUM(total) >= 100`），補齊「分組統計 → 篩出符合門檻的群組」這條 Navicat 常見路徑。
