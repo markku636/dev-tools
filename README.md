@@ -277,8 +277,9 @@ dbk --conn prod-mysql --format csv query "select id,name from users limit 20"
 DBKIT_PASSWORD=*** dbk --kind mysql --host 10.0.0.5 --user app db list
 dbk --conn prod-mysql table data orders --page 0 --page-size 50 --filter "status:=:paid" --sort "created_at:desc"
 
-# 匯出整表 / 轉儲整庫結構 / 備份
+# 匯出整表 / 轉儲整庫結構 / 備份（--data-format 支援 csv | tsv | xlsx | json | sql | markdown）
 dbk --conn prod-mysql export orders --to orders.csv --data-format csv --bom
+dbk --conn prod-mysql export orders --to orders.xlsx --data-format xlsx
 dbk --conn prod-mysql schema-dump > schema.sql
 dbk --conn prod-mysql backup mydb --to mydb.dump
 ```

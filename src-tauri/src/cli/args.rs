@@ -222,7 +222,7 @@ pub struct ExportArgs {
     /// 輸出檔路徑
     #[arg(long)]
     pub to: String,
-    /// 匯出格式：csv | tsv | json | sql | markdown
+    /// 匯出格式：csv | tsv | xlsx | json | sql | markdown
     #[arg(long = "data-format", default_value = "csv")]
     pub data_format: String,
     /// 不輸出表頭列
