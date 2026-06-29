@@ -12,7 +12,7 @@ import {
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard, pickSaveFile, useModalCount, useModalOverlay } from "./ui";
-import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rangeStats, buildInClause, TYPE_PRESETS } from "./sql";
+import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rangeStats, buildInClause, buildInsertValues, TYPE_PRESETS } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import RedisKeyTree from "./RedisKeyTree";
@@ -589,6 +589,14 @@ function DataPane({ tab }: { tab: OpenTab }) {
     }
   };
 
+  // 複製已勾選的列為 INSERT 語句到剪貼簿（SQL 連線；快速貼到別處）。
+  const copyMarkedInsert = () => {
+    if (!data || marked.size === 0 || !connKind) return;
+    const idxs = [...marked].sort((a, b) => a - b);
+    const rows = idxs.map((i) => data.rows[i]);
+    copyToClipboard(buildInsertValues(connKind, tab.database, tab.table, data.columns, rows), `已複製 ${rows.length} 列為 INSERT`);
+  };
+
   const submitInsert = async (row: RowInsert) => {
     setApplying(true);
     setErr(null);
@@ -1095,6 +1103,15 @@ function DataPane({ tab }: { tab: OpenTab }) {
             className="px-2 py-1 rounded hover:bg-fg/10 text-fg/70 inline-flex items-center gap-1"
           >
             <Icon icon={Upload} size={14} /> 匯出選取（{marked.size}）
+          </button>
+        )}
+        {isSqlKind && marked.size > 0 && (
+          <button
+            onClick={copyMarkedInsert}
+            title="複製已勾選的列為 INSERT 語句"
+            className="px-2 py-1 rounded hover:bg-fg/10 text-fg/70 inline-flex items-center gap-1"
+          >
+            複製為 INSERT（{marked.size}）
           </button>
         )}
         {editable && marked.size > 0 && (
