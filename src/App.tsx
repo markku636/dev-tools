@@ -2301,6 +2301,8 @@ function RunSummaryView({ summary }: { summary: RunSummary }) {
 // ---- 查詢面板：上 SQL、下結果（F6 執行） ----
 function QueryPane() {
   const { activeId } = useStore();
+  // 目前連線是否唯讀（反應式）：供工具列徽章與寫入提示。
+  const activeReadonly = useStore((s) => !!s.activeId && s.readonlyConns[s.activeId] === true);
   const kind = useStore((s) => s.connections.find((c) => c.id === activeId)?.kind);
   // 連線選擇器：列出已連線的連線供查詢面板直接切換目標（致敬 Navicat 連線下拉）。
   const connections = useStore((s) => s.connections);
@@ -2830,6 +2832,9 @@ function QueryPane() {
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </Select>
+            )}
+            {activeReadonly && (
+              <span className="text-[10px] px-1 rounded bg-amber-400/20 text-amber-300/90 shrink-0" title="此連線為唯讀模式：擋寫入 / DDL">唯讀</span>
             )}
             {supportsDbSelect && (
               <Select
