@@ -1249,6 +1249,8 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
     }
     const isView = m.objKind === "view";
     const isMyPg = m.kind === "mysql" || m.kind === "postgres";
+    // 唯讀連線：隱藏會寫入 / 破壞資料的動作（新增列 / 匯入 / 產生資料 / 改名 / 複製含資料 / 清空 / 截斷 / 刪除）。
+    const ro = readonlyConns[m.connId] === true;
     const nodes: MenuNode[] = [];
     // 開啟 / 設計
     nodes.push(it(isView ? "開啟視圖" : "開啟資料表", () => useStore.getState().openTable(m.connId, m.db, m.table, "data", m.objKind)));
@@ -1256,8 +1258,8 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
     nodes.push(it("屬性…", () => setTableProps({ connId: m.connId, db: m.db, table: m.table, kind: m.kind, objKind: m.objKind })));
     if (!isView) {
       nodes.push(it("設計資料表", () => useStore.getState().openTable(m.connId, m.db, m.table, "structure")));
-      nodes.push(it("新增資料表…", () => setDesignTable({ connId: m.connId, db: m.db, kind: m.kind })));
-      nodes.push(it("新增資料列…", () => {
+      if (!ro) nodes.push(it("新增資料表…", () => setDesignTable({ connId: m.connId, db: m.db, kind: m.kind })));
+      if (!ro) nodes.push(it("新增資料列…", () => {
         useStore.getState().openTable(m.connId, m.db, m.table);
         useStore.getState().requestInsert(`${m.connId}:${m.db}:${m.table}`);
       }));
@@ -1283,7 +1285,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
     });
     // 匯入 / 匯出 / 傾印 / 文件 / 資料產生
     nodes.push(sep);
-    if (!isView) nodes.push(it("匯入精靈…", () => setImportTbl({ connId: m.connId, db: m.db, table: m.table })));
+    if (!isView && !ro) nodes.push(it("匯入精靈…", () => setImportTbl({ connId: m.connId, db: m.db, table: m.table })));
     nodes.push(it("匯出精靈…", () => setExportTbl({ connId: m.connId, db: m.db, table: m.table })));
     if (m.kind === "mysql" || m.kind === "postgres" || m.kind === "sqlite")
       nodes.push(it("查詢建構器…", () => setBuilderTbl({ connId: m.connId, db: m.db, table: m.table, kind: m.kind })));
@@ -1296,7 +1298,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
       ],
     });
     nodes.push(it("資料字典…", () => setDataDict({ connId: m.connId, db: m.db, table: m.table, kind: m.kind })));
-    if (!isView) nodes.push(it("資料產生…", () => setDataGen({ connId: m.connId, db: m.db, table: m.table, kind: m.kind })));
+    if (!isView && !ro) nodes.push(it("資料產生…", () => setDataGen({ connId: m.connId, db: m.db, table: m.table, kind: m.kind })));
     // 維護 / 權限 / 模型
     const tail: MenuNode[] = [];
     if (!isView && m.kind === "mysql") {
@@ -1314,19 +1316,21 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
     if (m.kind === "mysql" || m.kind === "postgres" || m.kind === "sqlite")
       tail.push(it("逆向至模型…", () => setErTable({ connId: m.connId, db: m.db, table: m.table })));
     if (tail.length) { nodes.push(sep); nodes.push(...tail); }
-    // 生命週期
-    nodes.push(sep);
-    // 視圖改名：PG 容許 ALTER … RENAME；MySQL/SQLite 不支援 view 改名，隱藏以免必定失敗。
-    if (!isView || m.kind === "postgres") nodes.push(it("重新命名…", () => renameTable(m)));
-    if (!isView) nodes.push({
-      kind: "sub", label: "複製資料表", children: [
-        it("結構…", () => duplicateTable(m)),
-        it("含資料…", () => duplicateTable(m, true)),
-      ],
-    });
-    if (!isView) nodes.push(it("清空資料表（DELETE）", () => emptyTable(m), true));
-    if (!isView) nodes.push(it("截斷資料表（TRUNCATE）", () => truncateTable(m), true));
-    nodes.push(it(isView ? "刪除視圖" : "刪除資料表", () => dropTable(m), true));
+    // 生命週期（唯讀連線全部隱藏，避免破壞資料 / 結構）
+    if (!ro) {
+      nodes.push(sep);
+      // 視圖改名：PG 容許 ALTER … RENAME；MySQL/SQLite 不支援 view 改名，隱藏以免必定失敗。
+      if (!isView || m.kind === "postgres") nodes.push(it("重新命名…", () => renameTable(m)));
+      if (!isView) nodes.push({
+        kind: "sub", label: "複製資料表", children: [
+          it("結構…", () => duplicateTable(m)),
+          it("含資料…", () => duplicateTable(m, true)),
+        ],
+      });
+      if (!isView) nodes.push(it("清空資料表（DELETE）", () => emptyTable(m), true));
+      if (!isView) nodes.push(it("截斷資料表（TRUNCATE）", () => truncateTable(m), true));
+      nodes.push(it(isView ? "刪除視圖" : "刪除資料表", () => dropTable(m), true));
+    }
     // 重新整理
     nodes.push(sep);
     nodes.push(it("重新整理", () => refreshTables(m.connId, m.db)));
