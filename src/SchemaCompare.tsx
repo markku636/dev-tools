@@ -46,8 +46,9 @@ export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
     setGenBusy(true);
     try {
       const ddls = await Promise.all(tables.map((t) => api.tableDdl(connId, sourceDb, t).catch(() => `-- 取得 ${t} 的 DDL 失敗`)));
+      const tgtConnName = connections.find((c) => c.id === targetConnId)?.name ?? "";
       setSyncSql(
-        `-- 於目標資料庫「${target}」執行以補齊來源「${sourceDb}」有而目標缺少的資料表\n\n` +
+        `-- 於目標「${tgtConnName} · ${target}」執行以補齊來源「${sourceDb}」有而目標缺少的資料表\n\n` +
         ddls.map((d) => d.trim().replace(/;?\s*$/, ";")).join("\n\n"),
       );
     } catch (e: any) {
