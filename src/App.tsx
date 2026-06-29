@@ -33,6 +33,7 @@ import DataGenerator from "./DataGenerator";
 import QueryBuilder from "./QueryBuilder";
 import TransferDialog from "./TransferDialog";
 import DbTransferDialog from "./DbTransferDialog";
+import CommandPalette, { type PaletteItem } from "./CommandPalette";
 import { loadConnColors, persistConnColors, setConnColor, CONN_COLOR_PALETTE } from "./connColors";
 import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile, pickOpenFile, useEscToClose } from "./ui";
 import {
@@ -457,6 +458,9 @@ function ThemeToggle() {
 // ---- 快捷鍵說明（F1 開啟）----
 function ShortcutsHelp({ onClose }: { onClose: () => void }) {
   const groups: [string, [string, string][]][] = [
+    ["全域", [
+      ["Ctrl+K", "命令面板：跳到連線 / 資料庫 / 資料表，或執行動作"],
+    ]],
     ["查詢編輯器", [
       ["F6", "執行整段查詢"],
       ["Ctrl+Enter", "執行游標所在語句或選取段"],
@@ -624,6 +628,19 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
   const [connecting, setConnecting] = useState<Set<string>>(new Set());
   // 右鍵選單（連線節點）
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // 命令面板（Ctrl/Cmd+K）：跨連線快速跳轉。
+  const [palette, setPalette] = useState(false);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        if (document.body.dataset.modalCount) return; // 有對話框時讓路
+        e.preventDefault();
+        setPalette((p) => !p);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
   // 連線色標（致敬 Navicat connection color）：per-連線 顏色，localStorage 持久化。
   const [connColors, setConnColors] = useState(loadConnColors);
   const applyConnColor = (id: string, color: string) =>
@@ -755,6 +772,37 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
 
   const toggleConnect = (id: string) =>
     connectedIds.has(id) ? doDisconnect(id) : doConnect(id);
+
+  // 命令面板項目：連線 / 資料庫 / 已載入的資料表（含視圖）/ 常用動作。
+  const paletteItems = useMemo<PaletteItem[]>(() => {
+    const items: PaletteItem[] = [];
+    for (const c of connections) {
+      items.push({
+        id: `conn:${c.id}`, label: c.name, hint: KIND_META[c.kind].label, group: "連線", icon: Database,
+        run: () => { setActive(c.id); selectNode({ type: "connection", connId: c.id }); if (!connectedIds.has(c.id)) toggleConnect(c.id); },
+      });
+    }
+    for (const [connId, dbs] of Object.entries(databases)) {
+      const cn = connections.find((c) => c.id === connId)?.name ?? "";
+      for (const db of dbs) items.push({ id: `db:${connId}:${db}`, label: db, hint: cn, group: "資料庫", icon: Database, run: () => setActive(connId) });
+    }
+    for (const [key, objs] of Object.entries(expandedDbs)) {
+      const ci = key.indexOf(":");
+      const connId = key.slice(0, ci);
+      const db = key.slice(ci + 1);
+      const cn = connections.find((c) => c.id === connId)?.name ?? "";
+      for (const t of [...objs.tables, ...objs.views]) {
+        items.push({
+          id: `tbl:${key}:${t.name}`, label: t.name, hint: `${cn} · ${db}`, group: t.kind === "view" ? "視圖" : "資料表", icon: Table2,
+          run: () => { setActive(connId); useStore.getState().openTable(connId, db, t.name, "data", t.kind); },
+        });
+      }
+    }
+    items.push({ id: "act:query", label: "開啟查詢編輯器", group: "動作", icon: FileCode2, run: () => useStore.getState().setActiveTab("__query__") });
+    items.push({ id: "act:theme", label: "切換深淺色主題", group: "動作", icon: Moon, run: () => useTheme.getState().toggle() });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connections, connectedIds, databases, expandedDbs]);
 
   const refreshDbs = async (id: string) => {
     if (!connectedIds.has(id)) return;
@@ -1896,6 +1944,8 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
       {dbTransfer && (
         <DbTransferDialog connId={dbTransfer.connId} database={dbTransfer.db} onClose={() => setDbTransfer(null)} />
       )}
+
+      {palette && <CommandPalette items={paletteItems} onClose={() => setPalette(false)} />}
 
       {dataDict && (
         <DataDictionary connId={dataDict.connId} db={dataDict.db} table={dataDict.table} kind={dataDict.kind}
