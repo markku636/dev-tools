@@ -17,6 +17,7 @@
     "make:screenshots": "node scripts/make-screenshots.mjs"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.0",
     "@codemirror/lang-sql": "^6.10.0",
     "@codemirror/lint": "^6.9.7",
     "@codemirror/state": "^6.7.0",

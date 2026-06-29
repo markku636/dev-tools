@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import CodeMirror from "@uiw/react-codemirror";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { Prec, type Extension } from "@codemirror/state";
 import { indentWithTab } from "@codemirror/commands";
 import { sql, MySQL, PostgreSQL, SQLite, StandardSQL, type SQLDialect, type SQLNamespace } from "@codemirror/lang-sql";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
+import { snippetCompletion, type Completion, type CompletionSource } from "@codemirror/autocomplete";
 import { DbKind } from "./api";
 import { useTheme } from "./theme";
 import { lintSqlStructure } from "./sql";
+
+// SQL 片段（供編輯器自動完成展開：輸入名稱 → 補入 body）。
+export interface EditorSnippet { name: string; body: string; desc?: string }
+// 外部可命令式呼叫的方法（供「片段」工具列在游標處插入）。
+export interface SqlEditorHandle { insertText: (text: string) => void }
 
 // 送出（執行）時的上下文：選取文字、游標位移、是否整段執行（F6）。
 export interface SqlSubmit {
@@ -55,24 +61,14 @@ const baseTheme = EditorView.theme({
  * 共用 SQL 編輯器：CodeMirror 6 + 方言感知語法高亮 + 即時結構檢查 + 後端診斷疊加。
  * 取代散落各對話框的 <textarea>（RoutinesDialog / CreateViewDialog）。
  */
-export default function SqlEditor({
-  value,
-  onChange,
-  kind,
-  schema,
-  diagnostics,
-  onSubmit,
-  onSelectionChange,
-  placeholder,
-  className,
-  autoFocus,
-  readOnly,
-}: {
+interface SqlEditorProps {
   value: string;
   onChange: (v: string) => void;
   kind: DbKind;
   /** 表/欄結構，供自動完成（FROM/JOIN 後補表名、欄名）。 */
   schema?: SQLNamespace;
+  /** SQL 片段，供自動完成展開（輸入名稱即補入內容）。 */
+  snippets?: EditorSnippet[];
   diagnostics?: SqlDiagnostic[];
   onSubmit?: (s: SqlSubmit) => void; // F6 / Ctrl+Enter 觸發（如「執行」）
   /** 選取文字變動時回呼（供呼叫端讓「執行」鈕在有選取時顯示「執行選取」）。 */
@@ -81,8 +77,38 @@ export default function SqlEditor({
   className?: string;
   autoFocus?: boolean;
   readOnly?: boolean;
-}) {
+}
+
+const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function SqlEditor({
+  value,
+  onChange,
+  kind,
+  schema,
+  snippets,
+  diagnostics,
+  onSubmit,
+  onSelectionChange,
+  placeholder,
+  className,
+  autoFocus,
+  readOnly,
+}, ref) {
   const theme = useTheme((s) => s.theme);
+  // CodeMirror 實例 ref：供 insertText 於游標處插入（片段工具列用）。
+  const cmRef = useRef<ReactCodeMirrorRef>(null);
+  useImperativeHandle(ref, () => ({
+    insertText: (text: string) => {
+      const view = cmRef.current?.view;
+      if (!view) return;
+      const sel = view.state.selection.main;
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: text },
+        selection: { anchor: sel.from + text.length },
+        scrollIntoView: true,
+      });
+      view.focus();
+    },
+  }), []);
   // onSubmit 以 ref 持有，避免每次 render 重建 extensions（CodeMirror 會重新配置）。
   const submitRef = useRef(onSubmit);
   submitRef.current = onSubmit;
@@ -109,9 +135,10 @@ export default function SqlEditor({
   }, []);
 
   const extensions = useMemo<Extension[]>(() => {
+    // schema 提供表/欄自動完成；upperCaseKeywords 讓補入的關鍵字為大寫（符合 SQL 慣例）。
+    const lang = sql({ dialect: DIALECT[kind] ?? StandardSQL, schema, upperCaseKeywords: true });
     const ext: Extension[] = [
-      // schema 提供表/欄自動完成；upperCaseKeywords 讓補入的關鍵字為大寫（符合 SQL 慣例）。
-      sql({ dialect: DIALECT[kind] ?? StandardSQL, schema, upperCaseKeywords: true }),
+      lang,
       lintGutter(),
       baseTheme,
       EditorView.lineWrapping,
@@ -150,6 +177,19 @@ export default function SqlEditor({
         { delay: 250 },
       ),
     ];
+    // SQL 片段自動完成：把片段以 snippetCompletion 註冊為「此語言」的額外完成來源，
+    // 與 schema 表/欄完成併存（CodeMirror 會合併語言資料的所有 autocomplete 來源）。
+    if (snippets && snippets.length) {
+      const options: Completion[] = snippets.map((s) =>
+        snippetCompletion(s.body, { label: s.name, type: "text", detail: s.desc, boost: 2 }),
+      );
+      const snippetSource: CompletionSource = (ctx) => {
+        const word = ctx.matchBefore(/\w+/);
+        if (!word && !ctx.explicit) return null;
+        return { from: word ? word.from : ctx.pos, options, validFor: /^\w*$/ };
+      };
+      ext.push(lang.language.data.of({ autocomplete: snippetSource }));
+    }
     // 送出鍵（高優先，蓋過預設按鍵）：
     //  Mod-Enter = 執行選取或游標所在語句；F6 = 整段執行；Tab = 縮排（程式碼編輯慣例）。
     const fire = (view: EditorView, runAll: boolean) => {
@@ -168,10 +208,11 @@ export default function SqlEditor({
       ),
     );
     return ext;
-  }, [kind, diagnostics, schema]);
+  }, [kind, diagnostics, schema, snippets]);
 
   return (
     <CodeMirror
+      ref={cmRef}
       className={className}
       value={value}
       onChange={onChange}
@@ -192,4 +233,6 @@ export default function SqlEditor({
       }}
     />
   );
-}
+});
+
+export default SqlEditor;

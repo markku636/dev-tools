@@ -23,7 +23,7 @@ import SchemaCompare from "./SchemaCompare";
 import SearchObjectsDialog from "./SearchObjectsDialog";
 import InfoPanel from "./InfoPanel";
 import AssistantPanel from "./AssistantPanel";
-import SqlEditor, { type SqlSubmit } from "./SqlEditor";
+import SqlEditor, { type SqlSubmit, type SqlEditorHandle } from "./SqlEditor";
 import { useSqlSchema } from "./useSqlSchema";
 import { useAssistant } from "./assistant";
 import ExportDialog from "./ExportDialog";
@@ -35,6 +35,7 @@ import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile, pick
 import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
   loadSavedQueries, persistSavedQueries,
+  loadSnippets, persistSnippets, upsertSnippet, removeSnippet, type SqlSnippet,
   resultToTsv, resultToJson, resultToCsv, resultToMarkdown, fmtElapsed, splitSqlStatements, statementAtOffset, isDangerousStatement, isDangerousRedisCommand,
   rectToTsv, rangeStats,
   quoteIdent, qualifiedName,
@@ -2155,6 +2156,10 @@ function QueryPane() {
   const [showHistory, setShowHistory] = useState(false);
   const [saved, setSaved] = useState<SavedQuery[]>(loadSavedQueries);
   const [showSaved, setShowSaved] = useState(false);
+  // SQL 片段庫（Navicat 風）：編輯器自動完成 + 工具列插入 / 管理。
+  const [snippets, setSnippets] = useState<SqlSnippet[]>(loadSnippets);
+  const [showSnippets, setShowSnippets] = useState(false);
+  const editorRef = useRef<SqlEditorHandle>(null);
   // 下方分頁（致敬 Navicat 結果 / 摘要 / 解釋）：result=結果表格、summary=執行摘要、explain=視覺化執行計畫。
   const [bottomTab, setBottomTab] = useState<"result" | "summary" | "explain">("result");
   const [summary, setSummary] = useState<RunSummary | null>(null);
@@ -2174,13 +2179,13 @@ function QueryPane() {
 
   // Esc 關閉歷史 / 收藏下拉（與選單 / 對話框一致）。
   useEffect(() => {
-    if (!showHistory && !showSaved) return;
+    if (!showHistory && !showSaved && !showSnippets) return;
     const h = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setShowHistory(false); setShowSaved(false); }
+      if (e.key === "Escape") { setShowHistory(false); setShowSaved(false); setShowSnippets(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [showHistory, showSaved]);
+  }, [showHistory, showSaved, showSnippets]);
 
   // 更新並持久化目前連線的查詢內容（使用者輸入 / 載入歷史 / Tab 縮排都走這裡）。
   // 空字串改用 removeItem（而非存 ""）：否則 loadPersistedSql 會把 "" 當「上次內容」回傳，
@@ -2443,6 +2448,37 @@ function QueryPane() {
       return next;
     });
 
+  // 片段：傳給編輯器的精簡形（穩定 identity，避免每次 render 重建編輯器 extensions）。
+  const editorSnippets = useMemo(
+    () => snippets.map((s) => ({ name: s.name, body: s.body, desc: s.desc })),
+    [snippets],
+  );
+  // 插入片段到游標處（編輯器）；非 SQL 連線則退而附加到結尾。
+  const insertSnippet = (body: string) => {
+    if (editorRef.current) editorRef.current.insertText(body);
+    else persistSql(sql ? `${sql}\n${body}` : body);
+    setShowSnippets(false);
+  };
+  // 把目前選取（或整段）SQL 存成具名片段。
+  const saveAsSnippet = async () => {
+    const body = (editorSel ?? sql).trim();
+    if (!body) { toast.info("沒有可儲存的 SQL"); return; }
+    const name = await uiPrompt("片段名稱（輸入此名即可自動完成展開）：", { title: "新增 SQL 片段", placeholder: "例如：active_users", confirmText: "儲存" });
+    if (name === null || !name.trim()) return;
+    setSnippets((list) => {
+      const next = upsertSnippet(list, { name: name.trim(), body });
+      persistSnippets(next);
+      return next;
+    });
+    toast.success("已新增片段");
+  };
+  const deleteSnippet = (name: string) =>
+    setSnippets((list) => {
+      const next = removeSnippet(list, name);
+      persistSnippets(next);
+      return next;
+    });
+
   // 開啟 .sql 檔到編輯器（致敬 Navicat 查詢檔案）。
   const openSqlFile = async () => {
     const path = await pickOpenFile([{ name: "SQL", extensions: ["sql", "txt"] }]);
@@ -2683,6 +2719,45 @@ function QueryPane() {
               )}
             </div>
             {supportsExplain && (
+              <div className="relative">
+                <button type="button" onClick={() => setShowSnippets((s) => !s)}
+                  title="SQL 片段：插入常用骨架（編輯器內輸入片段名亦可自動完成展開）"
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70">
+                  <Icon icon={FileCode2} size={13} />片段
+                </button>
+                {showSnippets && (
+                  <>
+                    <div className="fixed inset-0 z-[89]" onClick={() => setShowSnippets(false)} />
+                    <div className="absolute right-0 mt-1 z-[90] w-[460px] max-h-[360px] overflow-auto bg-elevated border border-fg/10 rounded-lg shadow-2xl py-1">
+                      <div className="flex items-center justify-between px-3 py-1 text-[11px] text-fg/40 border-b border-fg/10">
+                        <span>SQL 片段（點擊插入游標處）</span>
+                        <button type="button" onClick={saveAsSnippet} className="inline-flex items-center gap-1 text-accent hover:underline">
+                          <Icon icon={Plus} size={11} />從選取 / 目前 SQL 新增
+                        </button>
+                      </div>
+                      {snippets.map((s) => (
+                        <div key={s.name} className="group flex items-start hover:bg-fg/10">
+                          <button type="button" onClick={() => insertSnippet(s.body)} title={s.body}
+                            className="flex-1 text-left px-3 py-1.5 min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <Icon icon={FileCode2} size={12} className="text-sky-300 shrink-0" />
+                              <span className="mono truncate">{s.name}</span>
+                              {s.desc && <span className="text-fg/40 truncate">— {s.desc}</span>}
+                              {s.builtin && <span className="ml-auto text-[9px] text-fg/30 px-1 rounded bg-fg/10 shrink-0">內建</span>}
+                            </div>
+                          </button>
+                          {!s.builtin && (
+                            <button type="button" onClick={() => deleteSnippet(s.name)} title="刪除片段" aria-label="刪除片段"
+                              className="px-2 py-1.5 text-fg/30 hover:text-red-400"><Icon icon={X} size={13} /></button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+            {supportsExplain && (
               <button type="button" onClick={() => setBuilderOpen(true)} disabled={running}
                 title="視覺化查詢建構器：勾選表 / 欄、視覺化 JOIN、條件 / 排序 / 聚合，產生 SELECT 並帶入編輯器"
                 className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
@@ -2723,10 +2798,12 @@ function QueryPane() {
           // 表/欄自動完成；F6 整段、Ctrl+Enter 游標所在語句或選取段、Ctrl+/ 註解、Tab 縮排。
           <div style={{ height: editor.size }} className="overflow-hidden bg-app border-t border-fg/10">
             <SqlEditor
+              ref={editorRef}
               value={sql}
               onChange={persistSql}
               kind={kind!}
               schema={schema}
+              snippets={editorSnippets}
               onSubmit={onEditorSubmit}
               onSelectionChange={setEditorSel}
               autoFocus

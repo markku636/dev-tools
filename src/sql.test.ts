@@ -72,8 +72,16 @@ import {
   isDangerousRedisCommand,
   lintSqlStructure,
   buildSelectQuery,
+  mergeSnippets,
+  upsertSnippet,
+  removeSnippet,
+  loadSnippets,
+  persistSnippets,
+  BUILTIN_SNIPPETS,
+  SNIPPETS_KEY,
   type NewColumn,
   type QbSpec,
+  type SqlSnippet,
 } from "./sql";
 
 describe("splitSqlStatements", () => {
@@ -946,5 +954,56 @@ describe("buildSelectQuery（視覺化查詢建構器）", () => {
       conds: [{ table: "orders", column: "path", op: "=", value: "a\\b" }],
     }));
     expect(sql).toBe("SELECT * FROM `shop`.`orders` WHERE `path` = 'a\\\\b';");
+  });
+});
+
+describe("SQL 片段庫（Snippets）", () => {
+  it("mergeSnippets：使用者同名覆蓋內建、其餘內建保留、依名稱排序、標記 builtin", () => {
+    const merged = mergeSnippets([{ name: "count", body: "MY COUNT" }, { name: "zzz", body: "Z" }]);
+    const count = merged.find((s) => s.name === "count")!;
+    expect(count.body).toBe("MY COUNT");
+    expect(count.builtin).toBe(false); // 被覆蓋 → 視為使用者片段
+    // 未覆蓋的內建仍在且標記 builtin。
+    const sel = merged.find((s) => s.name === "sel100")!;
+    expect(sel.builtin).toBe(true);
+    // 使用者新增的存在。
+    expect(merged.some((s) => s.name === "zzz")).toBe(true);
+    // 排序：名稱升冪。
+    const names = merged.map((s) => s.name);
+    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
+    // 空白名稱被忽略。
+    expect(mergeSnippets([{ name: "  ", body: "x" }]).every((s) => s.name.trim())).toBe(true);
+  });
+
+  it("upsert / remove：純函式、同名覆蓋、依名稱刪除", () => {
+    let list: SqlSnippet[] = mergeSnippets([]);
+    list = upsertSnippet(list, { name: "mine", body: "A" });
+    expect(list.find((s) => s.name === "mine")?.body).toBe("A");
+    list = upsertSnippet(list, { name: "mine", body: "B" }); // 覆蓋
+    expect(list.filter((s) => s.name === "mine")).toHaveLength(1);
+    expect(list.find((s) => s.name === "mine")?.body).toBe("B");
+    list = removeSnippet(list, "mine");
+    expect(list.some((s) => s.name === "mine")).toBe(false);
+  });
+
+  it("persist：只存與內建不同者；reload 後合併回內建", () => {
+    localStorage.removeItem(SNIPPETS_KEY);
+    const list = upsertSnippet(mergeSnippets([]), { name: "mine", body: "X" });
+    persistSnippets(list);
+    // 儲存的原始內容只應含使用者片段（不含未改的內建）。
+    const raw = JSON.parse(localStorage.getItem(SNIPPETS_KEY) || "[]");
+    expect(raw).toEqual([{ name: "mine", body: "X", desc: undefined }]);
+    // 載入後內建仍齊全 + 使用者片段在。
+    const loaded = loadSnippets();
+    expect(loaded.some((s) => s.name === "mine")).toBe(true);
+    expect(loaded.length).toBe(BUILTIN_SNIPPETS.length + 1);
+  });
+
+  it("persist：覆蓋內建後僅存覆蓋值；未改的內建不入存檔", () => {
+    localStorage.removeItem(SNIPPETS_KEY);
+    const list = upsertSnippet(mergeSnippets([]), { name: "count", body: "OVERRIDDEN" });
+    persistSnippets(list);
+    const raw = JSON.parse(localStorage.getItem(SNIPPETS_KEY) || "[]");
+    expect(raw).toEqual([{ name: "count", body: "OVERRIDDEN", desc: undefined }]);
   });
 });

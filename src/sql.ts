@@ -698,6 +698,79 @@ export function persistSavedQueries(list: SavedQuery[]) {
   }
 }
 
+// ---- SQL 片段庫（Snippets，致敬 Navicat 的程式碼片段）----
+// 編輯器自動完成（輸入名稱即可展開）+ 工具列管理。內建常用片段，使用者可新增 / 覆蓋。
+export const SNIPPETS_KEY = "db-kit:snippets";
+export interface SqlSnippet {
+  name: string; // 觸發名 / 顯示名（自動完成的 label）
+  body: string; // 展開內容（純 SQL）
+  desc?: string; // 說明（自動完成的 detail）
+  builtin?: boolean; // 來自內建（UI 不提供刪除；可被同名使用者片段覆蓋）
+}
+
+// 內建片段：方言相容度高的常用骨架，`table_name` / `column_name` 等為佔位符，展開後自行替換。
+export const BUILTIN_SNIPPETS: SqlSnippet[] = [
+  { name: "sel100", body: "SELECT *\nFROM table_name\nLIMIT 100;", desc: "查詢前 100 筆" },
+  { name: "count", body: "SELECT COUNT(*) AS n\nFROM table_name;", desc: "計數" },
+  { name: "distinct", body: "SELECT DISTINCT column_name\nFROM table_name;", desc: "去重欄位值" },
+  { name: "dups", body: "SELECT column_name, COUNT(*) AS n\nFROM table_name\nGROUP BY column_name\nHAVING COUNT(*) > 1\nORDER BY n DESC;", desc: "找重複值" },
+  { name: "groupcount", body: "SELECT column_name, COUNT(*) AS n\nFROM table_name\nGROUP BY column_name\nORDER BY n DESC\nLIMIT 20;", desc: "分組計數 Top 20" },
+  { name: "between", body: "SELECT *\nFROM table_name\nWHERE created_at BETWEEN '2024-01-01' AND '2024-12-31';", desc: "日期區間" },
+  { name: "ins", body: "INSERT INTO table_name (col1, col2)\nVALUES (val1, val2);", desc: "插入列" },
+  { name: "upd", body: "UPDATE table_name\nSET col1 = val1\nWHERE id = 0;", desc: "更新列" },
+  { name: "del", body: "DELETE FROM table_name\nWHERE id = 0;", desc: "刪除列" },
+  { name: "join", body: "SELECT a.*, b.*\nFROM table_a AS a\nJOIN table_b AS b ON a.id = b.a_id;", desc: "內連接" },
+  { name: "leftjoin", body: "SELECT a.*, b.*\nFROM table_a AS a\nLEFT JOIN table_b AS b ON a.id = b.a_id;", desc: "左連接" },
+];
+
+// 純函式：合併使用者片段與內建（同名以使用者為準），依名稱排序。供單元測試。
+export function mergeSnippets(user: SqlSnippet[]): SqlSnippet[] {
+  const byName = new Map<string, SqlSnippet>();
+  for (const s of BUILTIN_SNIPPETS) byName.set(s.name, { ...s, builtin: true });
+  for (const s of user) {
+    const name = s.name.trim();
+    if (name) byName.set(name, { name, body: s.body, desc: s.desc, builtin: false });
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function loadSnippets(): SqlSnippet[] {
+  let user: SqlSnippet[] = [];
+  try {
+    const arr = JSON.parse(localStorage.getItem(SNIPPETS_KEY) || "[]");
+    if (Array.isArray(arr)) {
+      user = arr.filter((x) => x && typeof x.name === "string" && typeof x.body === "string");
+    }
+  } catch {
+    /* 忽略損毀的存檔 */
+  }
+  return mergeSnippets(user);
+}
+
+// 只持久化「與內建不同」的片段（使用者新增 / 覆蓋）；內建未改不存，避免污染。
+export function persistSnippets(list: SqlSnippet[]) {
+  const builtin = new Map(BUILTIN_SNIPPETS.map((s) => [s.name, s.body]));
+  const user = list
+    .filter((s) => builtin.get(s.name) !== s.body)
+    .map((s) => ({ name: s.name, body: s.body, desc: s.desc }));
+  try {
+    localStorage.setItem(SNIPPETS_KEY, JSON.stringify(user));
+  } catch {
+    /* 忽略寫入失敗 */
+  }
+}
+
+// 純函式：新增 / 覆蓋一個片段（同名覆蓋），名稱排序。
+export function upsertSnippet(list: SqlSnippet[], snip: SqlSnippet): SqlSnippet[] {
+  const others = list.filter((s) => s.name !== snip.name);
+  return [...others, { ...snip, builtin: false }].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// 純函式：移除一個片段（依名稱）。
+export function removeSnippet(list: SqlSnippet[], name: string): SqlSnippet[] {
+  return list.filter((s) => s.name !== name);
+}
+
 // ---- 結果序列化（複製 / 匯出）----
 export function resultToTsv(r: QueryResult): string {
   const head = r.columns.join("\t");
