@@ -92,6 +92,13 @@ export default function DataSyncDialog({ connId, database, table, onClose, onUse
 
   const dbList = dstKind ? dbs.filter((d) => !isSystemDatabase(dstKind, d)) : dbs;
   const counts = res ? { i: res.diff.inserts.length, u: res.diff.updates.length, d: res.diff.deletes.length } : null;
+  // 欄位差異提示：來源獨有（同步時忽略）/ 目標獨有（不受影響）。
+  const colMismatch = res
+    ? {
+        srcOnly: res.src.columns.filter((c) => !res.dstCols.includes(c)),
+        dstOnly: res.dstCols.filter((c) => !res.src.columns.includes(c)),
+      }
+    : null;
 
   return (
     <Modal
@@ -158,6 +165,13 @@ export default function DataSyncDialog({ connId, database, table, onClose, onUse
             <span>刪除 <span className="text-red-400">{counts.d}</span>{!includeDeletes && counts.d > 0 ? "（未含）" : ""}</span>
           </div>
           {res?.capped && <div className="text-[11px] text-amber-300/80 inline-flex items-center gap-1"><Icon icon={AlertTriangle} size={11} />資料量超過 {CAP.toLocaleString()} 列上限，比對僅涵蓋前 {CAP.toLocaleString()} 列。</div>}
+          {colMismatch && (colMismatch.srcOnly.length > 0 || colMismatch.dstOnly.length > 0) && (
+            <div className="text-[11px] text-amber-300/80">
+              欄位不完全相同，僅同步共同欄位。
+              {colMismatch.srcOnly.length > 0 && <> 來源獨有（忽略）：<span className="mono">{colMismatch.srcOnly.join(", ")}</span>。</>}
+              {colMismatch.dstOnly.length > 0 && <> 目標獨有（不受影響）：<span className="mono">{colMismatch.dstOnly.join(", ")}</span>。</>}
+            </div>
+          )}
           {dml ? (
             <pre className="max-h-60 overflow-auto text-[11px] mono text-fg/75 whitespace-pre-wrap break-words bg-app/40 rounded p-2">{dml}</pre>
           ) : (
