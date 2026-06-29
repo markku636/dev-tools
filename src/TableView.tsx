@@ -191,6 +191,8 @@ function DataPane({ tab }: { tab: OpenTab }) {
 
   // 欄位標題右鍵選單
   const [colMenu, setColMenu] = useState<{ col: string; ci: number; x: number; y: number } | null>(null);
+  // 反向外鍵（被參照）多來源時的選擇器（值與候選關係）。
+  const [refChooser, setRefChooser] = useState<{ x: number; y: number; value: string; options: ErRelation[] } | null>(null);
 
   // 外鍵：欄名 → 參照表 / 欄（供儲存格右鍵「跳至參照的列」導覽，致敬 Navicat / TablePlus）。僅 SQL 資料表。
   const [fkMap, setFkMap] = useState<Record<string, { ref_table: string; ref_column: string }>>({});
@@ -219,15 +221,40 @@ function DataPane({ tab }: { tab: OpenTab }) {
     useStore.getState().clearPendingFilter();
   }, [pendingFilter, tab.key]);
 
+  // 反向外鍵（被參照）導覽：「尋找參照此列的列」。以 er_model 取得「哪些表的外鍵指向本表」，
+  // 延遲載入（點選才抓）並快取於本分頁。多個來源時跳出小選單讓使用者挑。
+  const incomingRelsRef = useRef<ErRelation[] | null>(null);
+  useEffect(() => { incomingRelsRef.current = null; }, [tab.connId, tab.database, tab.table]);
+  const findReferencing = async (r: number, c: number, x: number, y: number) => {
+    const col = data?.columns[c];
+    const val = cellValue(r, c);
+    if (!col || val === null) return;
+    try {
+      if (!incomingRelsRef.current) {
+        const m = await api.erModel(tab.connId, tab.database);
+        incomingRelsRef.current = m.relations;
+      }
+      const incoming = incomingRelsRef.current.filter((rel) => rel.to_table === tab.table && rel.to_column === col);
+      if (incoming.length === 0) { toast.info(`沒有資料表以外鍵參照 ${tab.table}.${col}`); return; }
+      if (incoming.length === 1) {
+        useStore.getState().openTableFiltered(tab.connId, tab.database, incoming[0].from_table, incoming[0].from_column, val);
+        return;
+      }
+      setRefChooser({ x, y, value: val, options: incoming });
+    } catch (e: any) {
+      toast.error(e?.message ?? "讀取參照關係失敗");
+    }
+  };
+
   // Esc 關閉儲存格 / 欄位右鍵選單（與對話框、側欄選單一致）。
   useEffect(() => {
-    if (!cellMenu && !colMenu) return;
+    if (!cellMenu && !colMenu && !refChooser) return;
     const h = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setCellMenu(null); setColMenu(null); }
+      if (e.key === "Escape") { setCellMenu(null); setColMenu(null); setRefChooser(null); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [cellMenu, colMenu]);
+  }, [cellMenu, colMenu, refChooser]);
 
   // 拖曳表頭右緣調整欄寬（在 window 上掛 move/up，拖出表頭也能追蹤）。
   const startResize = (col: string, e: React.PointerEvent) => {
@@ -651,6 +678,12 @@ function DataPane({ tab }: { tab: OpenTab }) {
         () => useStore.getState().openTableFiltered(tab.connId, tab.database, fk.ref_table, fk.ref_column, fkVal),
         false,
       ]);
+    }
+    // 反向外鍵：主鍵欄位的儲存格 → 尋找參照此列的列（被哪些表的外鍵指到）。
+    if (isSqlKind && fkCol && fkVal !== null && data?.primary_key.includes(fkCol)) {
+      const mx = cellMenu?.x ?? 0;
+      const my = cellMenu?.y ?? 0;
+      items.push(["尋找參照此列的列…", () => findReferencing(r, c, mx, my), false]);
     }
     if (editable) {
       items.push(
@@ -1518,6 +1551,26 @@ function DataPane({ tab }: { tab: OpenTab }) {
                 onClick={() => { setColMenu(null); fn(); }}
                 className="block w-full text-left px-3 py-1.5 hover:bg-fg/10 text-fg/80">
                 {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* 反向外鍵：多個來源表時的選擇器 */}
+      {refChooser && (
+        <>
+          <div className="fixed inset-0 z-[89]"
+            onClick={() => setRefChooser(null)}
+            onContextMenu={(e) => { e.preventDefault(); setRefChooser(null); }} />
+          <div className="fixed z-[90] min-w-[200px] bg-elevated border border-fg/10 rounded shadow-2xl py-1 text-sm"
+            style={{ left: refChooser.x, top: refChooser.y }}>
+            <div className="px-3 py-1 text-[11px] text-fg/40 border-b border-fg/10">參照此列的資料表</div>
+            {refChooser.options.map((rel) => (
+              <button key={`${rel.from_table}.${rel.from_column}`} type="button"
+                onClick={() => { const o = refChooser; setRefChooser(null); useStore.getState().openTableFiltered(tab.connId, tab.database, rel.from_table, rel.from_column, o.value); }}
+                className="block w-full text-left px-3 py-1.5 hover:bg-fg/10 text-fg/80 mono text-xs">
+                {rel.from_table}.{rel.from_column}
               </button>
             ))}
           </div>
