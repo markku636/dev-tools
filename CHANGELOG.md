@@ -1,5 +1,14 @@
 # Changelog
 
+## 複製整欄為 IN 子句（致敬 Navicat「Copy as IN」）
+
+資料表欄位標題右鍵新增「**複製整欄為 IN(...)（本頁）**」：把本頁該欄的值組成 `col IN ('a', 'b', …)`，直接貼進別處 WHERE 即可篩選那批值。
+
+> 驗證：`buildInClause` 抽為 `sql.ts` 純函式 + 4 項 vitest（共 151 項全通過）；前端 `tsc` + `eslint` + `vite build` 綠燈。
+
+- **去重**、方言感知識別字 / 字面值跳脫（單引號加倍）、純數字原樣（數值比較）。
+- **NULL 處理**：以 `OR col IS NULL` 並聯（`IN` 不含 NULL，避免漏掉 NULL 列）；整欄全為 NULL 時輸出 `col IS NULL`。
+
 ## 釘選 / 常用資料表（致敬 Navicat Favorites）
 
 把常開的表釘到側欄頂部「**★ 常用**」區，跨連線一鍵開啟——不必每次層層展開連線 → 資料庫 → 找表。

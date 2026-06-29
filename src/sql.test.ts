@@ -72,6 +72,7 @@ import {
   isDangerousRedisCommand,
   lintSqlStructure,
   buildSelectQuery,
+  buildInClause,
   mergeSnippets,
   upsertSnippet,
   removeSnippet,
@@ -982,6 +983,23 @@ describe("buildSelectQuery（視覺化查詢建構器）", () => {
       ],
     }));
     expect(sql).toBe('SELECT "status" FROM "shop"."orders" HAVING "status" <> \'void\';');
+  });
+});
+
+describe("buildInClause（Copy as IN）", () => {
+  it("去重 + 數字原樣 + 方言識別字跳脫", () => {
+    expect(buildInClause("mysql", "id", ["1", "2", "2", "3"])).toBe("`id` IN (1, 2, 3)");
+    expect(buildInClause("postgres", "id", ["1"])).toBe('"id" IN (1)');
+  });
+  it("字串以字面值跳脫（含單引號加倍）", () => {
+    expect(buildInClause("mysql", "name", ["a", "b'c"])).toBe("`name` IN ('a', 'b''c')");
+  });
+  it("NULL 以 OR col IS NULL 並聯；全為 NULL → 僅 IS NULL", () => {
+    expect(buildInClause("mysql", "x", ["1", null])).toBe("(`x` IN (1) OR `x` IS NULL)");
+    expect(buildInClause("mysql", "x", [null, null])).toBe("`x` IS NULL");
+  });
+  it("無任何值 → 合法但無相符（IN (NULL)）", () => {
+    expect(buildInClause("mysql", "x", [])).toBe("`x` IN (NULL)");
   });
 });
 

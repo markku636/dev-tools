@@ -670,6 +670,24 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
   return `SELECT ${spec.distinct ? "DISTINCT " : ""}${selectList} ${body};`;
 }
 
+// 由欄名 + 一組值組出 `col IN ('a', 'b', …)`（致敬 Navicat「Copy as IN」），供貼進 WHERE 過濾。
+// 去重、方言感知跳脫；純數字原樣（數值比較）；NULL 以 `col IS NULL` 並聯（IN 不含 NULL）。
+export function buildInClause(kind: DbKind, column: string, values: (string | null)[]): string {
+  const col = quoteIdent(kind, column);
+  const seen = new Set<string>();
+  const items: string[] = [];
+  let hasNull = false;
+  for (const v of values) {
+    if (v === null) { hasNull = true; continue; }
+    if (seen.has(v)) continue;
+    seen.add(v);
+    items.push(/^-?\d+(\.\d+)?$/.test(v.trim()) ? v.trim() : sqlLiteral(kind, v));
+  }
+  const inPart = items.length ? `${col} IN (${items.join(", ")})` : "";
+  if (hasNull) return inPart ? `(${inPart} OR ${col} IS NULL)` : `${col} IS NULL`;
+  return inPart || `${col} IN (NULL)`; // 無值（理論上不會發生）→ 給合法但無相符的條件
+}
+
 // ---- 查詢歷史（localStorage，最近在前，去重，上限 50）----
 export const QUERY_HISTORY_KEY = "db-kit:queryHistory";
 const QUERY_HISTORY_CAP = 50;
