@@ -1,3 +1,7 @@
+## MySQL：USE 前綴切分忽略引號內分號
+
+- split_leading_use 改用引號感知掃描找頂層分號，避免反引號資料庫名含 `;`（如 USE `odd;name`; …）被錯切。與唯讀守門的修正同屬一類（裸分隔掃描忽略引號）。新增 3 條後端測試。
+
 ## CLI 唯讀守門：分號切分支援字串 / 註解 / dollar-quote
 
 - 修正 dbk 唯讀模式誤擋合法查詢：原本以裸 `split(;)` 切語句，會把字串字面值 / 註解 / PostgreSQL dollar-quote 內的分號當成語句邊界，導致像 `SELECT * FROM logs WHERE msg LIKE %error; retry%` 這類查詢被誤判含寫入字樣而拒絕。改用與前端 splitSqlStatements 相同的引號 / 註解感知切分；只會切得更精準、不會漏切真正的語句邊界，所有寫入語句仍各自成句受檢，唯讀防護不被削弱。新增 5 條後端測試。

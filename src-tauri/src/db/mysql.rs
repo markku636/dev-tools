@@ -1397,13 +1397,44 @@ fn split_leading_use(sql: &str) -> Option<(String, String)> {
     if !t.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("use ")) {
         return None;
     }
-    let semi = t.find(';')?;
+    // 找第一個「頂層」分號：略過反引號 / 單 / 雙引號內的分號，避免反引號資料庫名含 `;`
+    //（如 USE `odd;name`; …）被錯切。位元組掃描僅比對 ASCII 標記，UTF-8 不相撞。
+    let semi = first_top_level_semicolon(t)?;
     let use_stmt = t[..semi].trim().to_string();
     let rest = t[semi + 1..].trim().to_string();
     if rest.is_empty() {
         return None;
     }
     Some((use_stmt, rest))
+}
+
+/// 回傳第一個不在引號（' " `）內的分號位元組位移；無則 None。連續兩個同引號視為跳脫。
+fn first_top_level_semicolon(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    let n = b.len();
+    let mut i = 0usize;
+    while i < n {
+        let c = b[i];
+        match c {
+            b'\'' | b'"' | b'`' => {
+                i += 1;
+                while i < n {
+                    if b[i] == c {
+                        if i + 1 < n && b[i + 1] == c {
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            b';' => return Some(i),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// 將 MySQL 列轉成字串格. 盡量以文字呈現，型別細節留待後續加強。
@@ -1519,4 +1550,31 @@ fn string_fallback(row: &MySqlRow, idx: usize) -> Option<String> {
         return Some(crate::db::bytes_to_display(&v));
     }
     Some("<unrenderable>".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_leading_use;
+
+    #[test]
+    fn splits_leading_use_then_rest() {
+        let (u, r) = split_leading_use("USE shop; SELECT 1").unwrap();
+        assert_eq!(u, "USE shop");
+        assert_eq!(r, "SELECT 1");
+    }
+
+    #[test]
+    fn no_split_without_trailing_statement() {
+        assert!(split_leading_use("USE shop;").is_none());
+        assert!(split_leading_use("USE shop").is_none());
+        assert!(split_leading_use("SELECT 1; SELECT 2").is_none());
+    }
+
+    #[test]
+    fn ignores_semicolon_inside_backticked_db_name() {
+        // 反引號資料庫名含 `;` 不可被當作 USE 的結尾分號。
+        let (u, r) = split_leading_use("USE `odd;name`; SELECT 1").unwrap();
+        assert_eq!(u, "USE `odd;name`");
+        assert_eq!(r, "SELECT 1");
+    }
 }
