@@ -146,7 +146,12 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
           </label>
           {hasHeader && (
             <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-              <input type="checkbox" checked={overrideNames} onChange={(e) => setOverrideNames(e.target.checked)} />
+              <input type="checkbox" checked={overrideNames}
+                onChange={(e) => {
+                  setOverrideNames(e.target.checked);
+                  // 啟用時若欄名空白，先帶入目標表欄位作為對應起點（使用者再依檔案欄序調整）。
+                  if (e.target.checked && !columns.trim() && targetCols.length) setColumns(targetCols.join(", "));
+                }} />
               重新指定欄名（覆蓋檔案表頭，對齊到目標欄位）
             </label>
           )}
