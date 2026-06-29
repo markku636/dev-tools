@@ -3,7 +3,7 @@ import {
   Blocks, Table2, Plus, Trash2, X, ArrowUpDown, Filter, Wand2, Copy, Check,
   Link2, Sigma, Play, Database,
 } from "lucide-react";
-import { api, DbKind, ErModel, ErTable } from "./api";
+import { api, DbKind, ErModel, ErTable, QueryResult } from "./api";
 import {
   buildSelectQuery, formatSql, isSystemDatabase,
   type QbColumn, type QbJoin, type QbCond, type QbHaving, type QbOrder, type QbAgg, type QbJoinType, type QbConj,
@@ -64,6 +64,10 @@ export default function QueryBuilder({
   const [distinct, setDistinct] = useState(false);
   const [limit, setLimit] = useState<string>("100");
   const [copied, setCopied] = useState(false);
+  // 結果預覽：在建構器內直接執行產生的查詢（套上預覽上限）看結果，免切到編輯器。
+  const [preview, setPreview] = useState<QueryResult | null>(null);
+  const [previewErr, setPreviewErr] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   // 載入資料庫清單
   useEffect(() => {
@@ -82,6 +86,7 @@ export default function QueryBuilder({
         if (cancelled) return;
         setModel(m);
         setPicked([]); setCols([]); setJoins([]); setConds([]); setHavings([]); setOrders([]);
+        setPreview(null); setPreviewErr(null);
       })
       .catch((e) => { if (!cancelled) { setErr(e?.message ?? "讀取結構失敗"); setModel(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -162,6 +167,18 @@ export default function QueryBuilder({
   };
   const colShown = (table: string, column: string) =>
     cols.some((x) => x.table === table && x.column === column);
+  // 全選此表欄位（補入尚未顯示者，維持原有聚合 / 別名設定）。
+  const selectAllCols = (table: string) => {
+    setCols((c) => {
+      const shown = new Set(c.filter((x) => x.table === table).map((x) => x.column));
+      const add = colsOf(table)
+        .filter((col) => !shown.has(col))
+        .map((col) => ({ id: uid(), table, column: col, agg: "" as QbAgg }));
+      return [...c, ...add];
+    });
+  };
+  // 清空此表所選欄位。
+  const clearCols = (table: string) => setCols((c) => c.filter((x) => x.table !== table));
 
   const spec = useMemo(() => ({
     db,
@@ -195,6 +212,23 @@ export default function QueryBuilder({
   );
 
   const doCopy = async () => { if (await copyToClipboard(generated)) { setCopied(true); setTimeout(() => setCopied(false), 1200); } };
+
+  // 執行預覽：跑產生的查詢但套上預覽上限（未設 LIMIT → 200；已設 → 取 min(設定, 500)）。
+  const runPreview = async () => {
+    if (!spec.baseTable || previewing) return;
+    const cap = spec.limit && spec.limit > 0 ? Math.min(spec.limit, 500) : 200;
+    const sql = buildSelectQuery(kind, { ...spec, limit: cap });
+    if (!sql) return;
+    setPreviewing(true); setPreviewErr(null);
+    try {
+      setPreview(await api.runQuery(connId, sql));
+    } catch (e: any) {
+      setPreview(null);
+      setPreviewErr(e?.message ?? "預覽失敗");
+    } finally {
+      setPreviewing(false);
+    }
+  };
 
   const dbList = dbs.filter((d) => !isSystemDatabase(kind, d));
 
@@ -276,6 +310,8 @@ export default function QueryBuilder({
                         <Icon icon={Table2} size={12} className="text-accent" />
                         <span className="text-xs font-medium truncate flex-1">{t}</span>
                         {i === 0 && <span className="text-[10px] text-fg/40 px-1 rounded bg-fg/10">基底</span>}
+                        <button type="button" onClick={() => selectAllCols(t)} title="全選此表欄位" className="text-[10px] text-fg/40 hover:text-accent">全選</button>
+                        <button type="button" onClick={() => clearCols(t)} title="清空此表欄位" className="text-[10px] text-fg/40 hover:text-accent">清空</button>
                         <button type="button" onClick={() => removeTable(t)} className="text-fg/30 hover:text-red-400" title="移除此表"><Icon icon={X} size={13} /></button>
                       </div>
                       <div className="max-h-44 overflow-auto py-1">
@@ -431,14 +467,52 @@ export default function QueryBuilder({
           )}
         </div>
 
-        {/* 右：SQL 預覽 */}
+        {/* 右：SQL 預覽 + 執行結果預覽 */}
         <div className="w-80 shrink-0 border-l border-fg/10 flex flex-col min-h-0">
           <div className="px-3 py-1.5 border-b border-fg/10 text-[11px] text-fg/40 flex items-center gap-1.5">
             <Icon icon={Wand2} size={12} />產生的 SQL
+            <button type="button" onClick={runPreview} disabled={!generated || previewing}
+              title="在建構器內執行查詢看結果（套上預覽上限）"
+              className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
+              <Icon icon={Play} size={11} />{previewing ? "預覽中…" : "預覽"}
+            </button>
           </div>
-          <pre className="flex-1 overflow-auto p-3 text-xs mono text-fg/80 whitespace-pre-wrap break-words">
+          <pre className="flex-1 overflow-auto p-3 text-xs mono text-fg/80 whitespace-pre-wrap break-words min-h-[80px]">
             {generated || "—"}
           </pre>
+          {(preview || previewErr) && (
+            <div className="border-t border-fg/10 flex flex-col min-h-0 max-h-[45%]">
+              <div className="px-3 py-1 text-[11px] text-fg/40 border-b border-fg/10 shrink-0">
+                {previewErr ? <span className="text-red-400">預覽錯誤</span> : `預覽結果 · ${preview?.rows.length ?? 0} 列`}
+              </div>
+              <div className="overflow-auto">
+                {previewErr ? (
+                  <div className="p-2 text-xs text-red-300 whitespace-pre-wrap break-words">{previewErr}</div>
+                ) : preview && preview.columns.length > 0 ? (
+                  <table className="text-[11px] border-collapse w-full">
+                    <thead>
+                      <tr className="text-left text-fg/40">
+                        {preview.columns.map((c, i) => <th key={i} className="px-2 py-1 font-medium border-b border-fg/10 whitespace-nowrap">{c}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.rows.map((row, ri) => (
+                        <tr key={ri} className="border-b border-fg/5">
+                          {row.map((v, ci) => (
+                            <td key={ci} className="px-2 py-0.5 mono text-fg/70 max-w-[140px] truncate" title={v ?? "NULL"}>
+                              {v === null ? <span className="text-fg/25 italic">NULL</span> : v}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="p-2 text-xs text-fg/40">（無結果）</div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </Modal>
