@@ -13,7 +13,7 @@ const ALLOWED: &[&str] = &[
 const CTE_WRITE: &[&str] = &["insert", "update", "delete", "merge"];
 
 pub fn ensure_read_only(sql: &str) -> AppResult<()> {
-    for stmt in sql.split(';') {
+    for stmt in split_statements(sql) {
         let kw = first_keyword(stmt);
         if kw.is_empty() {
             continue; // 空句 / 純註解
@@ -53,6 +53,85 @@ fn contains_keyword(haystack: &str, word: &str) -> bool {
         start = i + 1;
     }
     false
+}
+
+/// 以分號切分多條語句，但略過字串 / 識別字（' " `）、註解（-- 行、/* */ 區塊）與 PostgreSQL
+/// dollar-quote（$$ … $$ / $tag$ … $tag$）內的分號——與前端 splitSqlStatements 同套規則，
+/// 避免把字串裡的 `;` 誤判成語句邊界而錯擋合法查詢（如 `LIKE '%a; b%'`）。只會切得更精準，
+/// 不會少切真正的語句邊界，故所有寫入語句仍各自成句受檢，唯讀防護不被削弱。
+/// 位元組掃描僅比對 ASCII 標記，UTF-8 連續位元組（≥0x80）不會與其相撞，切點亦落在字元邊界。
+fn split_statements(sql: &str) -> Vec<&str> {
+    let b = sql.as_bytes();
+    let n = b.len();
+    let is_tag = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < n {
+        let c = b[i];
+        let nx = if i + 1 < n { b[i + 1] } else { 0 };
+        match c {
+            b'\'' | b'"' | b'`' => {
+                // 字串 / 識別字：找對應結束引號（連續兩個同引號視為跳脫）。
+                i += 1;
+                while i < n {
+                    if b[i] == c {
+                        if i + 1 < n && b[i + 1] == c {
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            b'-' if nx == b'-' => {
+                i += 2;
+                while i < n && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if nx == b'*' => {
+                i += 2;
+                while i < n && !(b[i] == b'*' && i + 1 < n && b[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(n);
+            }
+            b'$' => {
+                // PostgreSQL dollar-quote 開頭 $tag$（tag 為 [A-Za-z0-9_]*）；否則當一般字元。
+                let mut j = i + 1;
+                while j < n && is_tag(b[j]) {
+                    j += 1;
+                }
+                if j < n && b[j] == b'$' {
+                    let tag = &sql[i..=j];
+                    let tlen = tag.len();
+                    i = j + 1;
+                    while i < n {
+                        if b[i] == b'$' && i + tlen <= n && &sql[i..i + tlen] == tag {
+                            i += tlen;
+                            break;
+                        }
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            b';' => {
+                out.push(&sql[start..i]);
+                i += 1;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    if start < n {
+        out.push(&sql[start..n]);
+    }
+    out
 }
 
 /// 取語句的第一個關鍵字（小寫），跳過前導空白與行 / 區塊註解。
@@ -110,5 +189,25 @@ mod tests {
         assert!(ensure_read_only("WITH i AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM i").is_err());
         // 唯讀 CTE 照常放行；欄名含 delete 字根（deleted_at）不誤判。
         assert!(ensure_read_only("WITH x AS (SELECT deleted_at FROM t) SELECT * FROM x").is_ok());
+    }
+
+    #[test]
+    fn does_not_split_on_semicolons_inside_literals_or_comments() {
+        // 字串字面值內的 `;` 與寫入字樣不可被當成語句邊界（原 naive split 會誤擋）。
+        assert!(ensure_read_only("SELECT * FROM logs WHERE msg LIKE '%error; retry%'").is_ok());
+        assert!(ensure_read_only("SELECT 'a; delete from t' AS note").is_ok());
+        assert!(ensure_read_only("SELECT ';' /* ; delete */ , 1").is_ok());
+        // 反引號識別字內含 `;` 亦然。
+        assert!(ensure_read_only("SELECT `a;b` FROM t").is_ok());
+        // 但真正的語句邊界仍切分受檢：字串後的真分號接寫入要擋。
+        assert!(ensure_read_only("SELECT 'ok'; DELETE FROM t").is_err());
+        assert!(ensure_read_only("SELECT 1 /* c */ ; drop table t").is_err());
+    }
+
+    #[test]
+    fn ignores_semicolons_inside_dollar_quotes() {
+        // dollar-quote 函式本體含分號不應被切；首句為唯讀 DO/SELECT 才放行。
+        assert!(ensure_read_only("SELECT $$a; delete from t$$ AS body").is_ok());
+        assert!(ensure_read_only("SELECT $tag$x; update y$tag$ AS body").is_ok());
     }
 }
