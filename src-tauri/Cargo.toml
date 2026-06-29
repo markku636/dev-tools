@@ -59,6 +59,8 @@ argon2 = "0.5"
 rand = "0.8"
 # Excel (.xlsx) 匯出：純 Rust（內含 zip + miniz_oxide，無 C / 系統相依），跨平台可打包。
 rust_xlsxwriter = "0.79"
+# Excel (.xlsx/.xls) 匯入讀取：純 Rust，dates 特性讓日期欄解析為日期而非序號。
+calamine = { version = "0.26", features = ["dates"] }
 
 # OS keychain：依平台選用原生後端，避免在 Windows 上編譯 secret-service。
 [target.'cfg(windows)'.dependencies]

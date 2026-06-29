@@ -1,5 +1,16 @@
 # Changelog
 
+## Excel（.xlsx/.xls）匯入（致敬 Navicat 匯入精靈的 Excel 來源）
+
+匯入對話框現在能直接吃 Excel 檔，不必先轉存 CSV。與 CSV 匯入共用同一套逐列寫入邏輯（型別轉型 / 空→NULL / 遇錯即停 / 錯誤回報）。
+
+> 驗證：後端新增 `calamine`（純 Rust 讀 xlsx，`dates` 特性讓日期欄為日期而非序號）；`cargo test import::` 13 項全通過（含「產 xlsx → 讀回」端到端與非法檔被拒 2 項新測試）、新程式碼 `cargo clippy` 零警告；前端 `tsc` + `eslint` + `vite build` 綠燈。
+
+- **檔案選擇器接受 `.xlsx / .xls`**：依副檔名自動切到 Excel 匯入器（分隔字元對 Excel 無意義，介面已標示）。
+- **取第一張工作表的使用範圍**；calamine 會把不齊列補空格，使每列欄數一致，利於與表頭比對。
+- **儲存格型別保真**：日期 → `YYYY-MM-DD HH:MM:SS`、整數型浮點去 `.0`、布林 / 字串原樣、公式錯誤格 → 空字串；尾端全空白列自動去除。
+- 重構：CSV / Excel 匯入抽出共用 `import_rows`，行為一致；後端讀檔（避免大檔經 JS bridge），上限 100 MB。
+
 ## 查詢結果可匯出 Excel / SQL（統一走後端匯出管線）
 
 查詢結果的「匯出」原本只能存 CSV / JSON / TSV / Markdown（前端純文字）。現改走後端 `export_rows`，與資料表匯出共用同一套 `render`，**新增 Excel (.xlsx) 與 SQL (INSERT)**，且文字格式也享有 CSV 注入防護 / BOM 等一致行為。

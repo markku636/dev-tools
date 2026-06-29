@@ -476,6 +476,9 @@ export const api = {
     invoke<ExportResult>("export_rows", { columns, rows, options, outPath }),
   importCsv: (id: string, database: string, table: string, path: string, options: ImportOptions) =>
     invoke<ImportResult>("import_csv", { id, database, table, path, options }),
+  // Excel (.xlsx/.xls) 匯入：取第一張工作表，與 CSV 匯入共用後端寫入邏輯。
+  importExcel: (id: string, database: string, table: string, path: string, options: ImportOptions) =>
+    invoke<ImportResult>("import_excel", { id, database, table, path, options }),
   schemaDump: (id: string, database: string) => invoke<string>("schema_dump", { id, database }),
   explainQuery: (id: string, sql: string) =>
     invoke<QueryResult>("explain_query", { id, sql }),

@@ -111,10 +111,92 @@ pub async fn import_csv(
         .as_deref()
         .and_then(|d| d.chars().next())
         .unwrap_or(',');
+    let rows = parse_csv(content, delim);
+    import_rows(manager, id, database, table, rows, opts).await
+}
 
-    let mut rows = parse_csv(content, delim);
+/// Excel (.xlsx/.xls) → 二維字串。取第一張工作表的使用範圍；calamine 會把不齊列補空格，
+/// 故每列欄數一致（利於與表頭比對）。儲存格依型別轉成字串（日期 → `YYYY-MM-DD HH:MM:SS`、
+/// 整數型浮點去小數），空格為空字串。去除尾端全空白列（Excel 殘留空列）。
+pub fn parse_xlsx(bytes: &[u8]) -> AppResult<Vec<Vec<String>>> {
+    use calamine::{Reader, Xlsx};
+    use std::io::Cursor;
+
+    let mut wb: Xlsx<_> = Xlsx::new(Cursor::new(bytes))
+        .map_err(|e| AppError::Query(format!("讀取 Excel 失敗：{e}")))?;
+    let sheet = wb
+        .sheet_names()
+        .first()
+        .cloned()
+        .ok_or_else(|| AppError::Query("Excel 沒有任何工作表".to_string()))?;
+    let range = wb
+        .worksheet_range(&sheet)
+        .map_err(|e| AppError::Query(format!("讀取工作表「{sheet}」失敗：{e}")))?;
+
+    let mut out: Vec<Vec<String>> = range
+        .rows()
+        .map(|row| row.iter().map(cell_to_string).collect())
+        .collect();
+    while out
+        .last()
+        .map(|r| r.iter().all(|c| c.is_empty()))
+        .unwrap_or(false)
+    {
+        out.pop();
+    }
+    Ok(out)
+}
+
+/// 單一儲存格 → 字串（保真為主）。
+fn cell_to_string(d: &calamine::Data) -> String {
+    use calamine::Data;
+    match d {
+        Data::Empty => String::new(),
+        Data::String(s) => s.clone(),
+        Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
+        Data::Bool(b) => b.to_string(),
+        Data::Int(i) => i.to_string(),
+        // Excel 內部以 f64 存數字；整數型浮點去掉 .0，其餘以最短往返表示。
+        Data::Float(f) => {
+            if f.is_finite() && f.fract() == 0.0 && f.abs() < 9.0e15 {
+                (*f as i64).to_string()
+            } else {
+                f.to_string()
+            }
+        }
+        Data::DateTime(dt) => dt
+            .as_datetime()
+            .map(|x| x.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| dt.to_string()),
+        // 公式錯誤格（#DIV/0! 等）→ 空字串，避免把錯誤文字塞進資料。
+        Data::Error(_) => String::new(),
+    }
+}
+
+/// Excel 匯入：解析 + 與 CSV 共用同一套寫入邏輯（型別轉型 / 空→NULL / 錯誤回報）。
+pub async fn import_xlsx(
+    manager: &ConnectionManager,
+    id: &str,
+    database: &str,
+    table: &str,
+    bytes: &[u8],
+    opts: &ImportOptions,
+) -> AppResult<ImportResult> {
+    let rows = parse_xlsx(bytes)?;
+    import_rows(manager, id, database, table, rows, opts).await
+}
+
+/// 共用列寫入：由二維字串（含可選表頭）逐列 insert_row。CSV / Excel 匯入皆走此。
+async fn import_rows(
+    manager: &ConnectionManager,
+    id: &str,
+    database: &str,
+    table: &str,
+    mut rows: Vec<Vec<String>>,
+    opts: &ImportOptions,
+) -> AppResult<ImportResult> {
     if rows.is_empty() {
-        return Err(AppError::Query("CSV 沒有任何資料列".to_string()));
+        return Err(AppError::Query("沒有任何資料列".to_string()));
     }
 
     // 決定欄名。
@@ -263,5 +345,36 @@ mod tests {
         ]);
         // 確認第一欄是乾淨的 "id"（不含 BOM）。
         assert_eq!(got[0][0], "id");
+    }
+
+    // ---- Excel 匯入：以 rust_xlsxwriter 產一個活頁簿再讀回，端到端驗證 parse_xlsx ----
+    #[test]
+    fn parse_xlsx_roundtrip_types_and_blanks() {
+        use rust_xlsxwriter::Workbook;
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet();
+        // 表頭
+        ws.write_string(0, 0, "id").unwrap();
+        ws.write_string(0, 1, "name").unwrap();
+        ws.write_string(0, 2, "price").unwrap();
+        // 列 1：整數型浮點去 .0、字串、含小數
+        ws.write_number(1, 0, 1.0).unwrap();
+        ws.write_string(1, 1, "apple").unwrap();
+        ws.write_number(1, 2, 9.99).unwrap();
+        // 列 2：name 留空（空白格）
+        ws.write_number(2, 0, 2.0).unwrap();
+        ws.write_number(2, 2, 0.0).unwrap();
+        let bytes = wb.save_to_buffer().unwrap();
+
+        let got = super::parse_xlsx(&bytes).unwrap();
+        assert_eq!(got[0], vec!["id", "name", "price"]);
+        assert_eq!(got[1], vec!["1", "apple", "9.99"]);
+        // 空白格 → 空字串；整數型浮點 → 無小數。
+        assert_eq!(got[2], vec!["2", "", "0"]);
+    }
+
+    #[test]
+    fn parse_xlsx_rejects_non_xlsx_bytes() {
+        assert!(super::parse_xlsx(b"not a real xlsx").is_err());
     }
 }

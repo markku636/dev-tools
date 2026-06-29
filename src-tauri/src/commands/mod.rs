@@ -633,6 +633,32 @@ pub async fn import_csv(
     crate::import::import_csv(&state.manager, &id, &database, &table, &content, &options).await
 }
 
+/// Excel (.xlsx/.xls) 匯入到資料表（致敬 Navicat 匯入精靈的 Excel 來源）。取第一張工作表，
+/// 與 CSV 匯入共用同一套逐列寫入邏輯（型別轉型 / 空→NULL / 錯誤回報）。delimiter 對 Excel 無意義。
+#[tauri::command]
+pub async fn import_excel(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    table: String,
+    path: String,
+    options: crate::import::ImportOptions,
+) -> AppResult<crate::import::ImportResult> {
+    const MAX_IMPORT_BYTES: u64 = 100 * 1024 * 1024;
+    if let Ok(meta) = tokio::fs::metadata(&path).await {
+        if meta.len() > MAX_IMPORT_BYTES {
+            return Err(AppError::Query(format!(
+                "檔案過大（約 {} MB），Excel 匯入上限 100 MB",
+                meta.len() / 1024 / 1024
+            )));
+        }
+    }
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| AppError::Query(format!("讀取檔案失敗：{e}")))?;
+    crate::import::import_xlsx(&state.manager, &id, &database, &table, &bytes, &options).await
+}
+
 /// 匯出整個資料庫的結構 SQL（所有表的建表語句）。致敬 Navicat / DBeaver 的「轉儲結構」。
 #[tauri::command]
 pub async fn schema_dump(

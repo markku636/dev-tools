@@ -27,21 +27,28 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
       toast.error("無表頭時請先填欄名（逗號分隔）");
       return;
     }
-    const path = await pickOpenFile([{ name: "CSV / TSV", extensions: ["csv", "tsv", "txt"] }]);
+    const path = await pickOpenFile([
+      { name: "CSV / TSV / Excel", extensions: ["csv", "tsv", "txt", "xlsx", "xls"] },
+    ]);
     if (!path) return;
+    // 依副檔名選匯入器：xlsx/xls 走 Excel（忽略分隔字元），其餘走 CSV。
+    const isExcel = /\.(xlsx|xls)$/i.test(path);
     setBusy(true);
     setResult(null);
     try {
-      const res = await api.importCsv(connId, database, table, path, {
+      const opts = {
         delimiter,
         has_header: hasHeader,
         empty_as_null: emptyAsNull,
         columns: cols,
         stop_on_error: stopOnError,
-      });
+      };
+      const res = isExcel
+        ? await api.importExcel(connId, database, table, path, opts)
+        : await api.importCsv(connId, database, table, path, opts);
       setResult(res);
       if (res.failed === 0) {
-        toast.success(`已匯入 ${res.imported} 列`);
+        toast.success(`已匯入 ${res.imported} 列${isExcel ? "（Excel）" : ""}`);
       } else {
         toast.error(`匯入 ${res.imported} 列、失敗 ${res.failed} 列`);
       }
@@ -56,7 +63,7 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
   return (
     <Modal
       onClose={onClose}
-      title={<>匯入 CSV · <span className="mono text-fg/60">{table}</span></>}
+      title={<>匯入 CSV / Excel · <span className="mono text-fg/60">{table}</span></>}
       icon={Download}
       size="sm"
       zClass="z-50"
@@ -79,6 +86,7 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
                 { value: ";", label: "分號 ;" },
               ]}
             />
+            <span className="text-[11px] text-fg/35">Excel 忽略此項</span>
           </div>
 
           <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
