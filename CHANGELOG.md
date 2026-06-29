@@ -1,5 +1,11 @@
 # Changelog
 
+## 匯出選取的列（資料格批次列）
+
+資料格勾選多列後，動作列新增「**匯出選取**」——把勾選的列另存 CSV / Excel / JSON / SQL / TSV / Markdown（走後端 export_rows，依副檔名選格式）。與「刪除選取」並列。
+
+> 驗證：沿用 export_rows 後端管線；前端 `tsc` + `eslint` + `vite build` 綠燈、vitest 184 項全通過。
+
 ## 匯入：去除每格前後空白（資料清理）
 
 匯入 CSV / Excel 時可勾選「去除每格前後空白」，把「 alice 」清成「alice」，並在 empty→NULL 判定前套用（全空白 → NULL）。

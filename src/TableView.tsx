@@ -11,7 +11,7 @@ import {
   api, ColumnInfo, DbKind, ErRelation, Filter as FilterCond, ForeignKeyInfo, IndexInfo, KeyDetail, KeyEdit, KeyPage, PagedData, RowInsert, Sort, SortDir,
 } from "./api";
 import { OpenTab, useStore } from "./store";
-import { toast, uiConfirm, uiPrompt, copyToClipboard, useModalCount, useModalOverlay } from "./ui";
+import { toast, uiConfirm, uiPrompt, copyToClipboard, pickSaveFile, useModalCount, useModalOverlay } from "./ui";
 import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rangeStats, buildInClause, TYPE_PRESETS } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
@@ -557,6 +557,38 @@ function DataPane({ tab }: { tab: OpenTab }) {
     }
   };
 
+  // 匯出已勾選的列（本頁）：走後端 export_rows，依副檔名選格式（含 Excel）。
+  const exportMarked = async () => {
+    if (!data || marked.size === 0) return;
+    const idxs = [...marked].sort((a, b) => a - b);
+    const rows = idxs.map((i) => data.rows[i]);
+    const path = await pickSaveFile(`${tab.table}-selection.csv`, [
+      { name: "CSV", extensions: ["csv"] },
+      { name: "Excel (.xlsx)", extensions: ["xlsx"] },
+      { name: "JSON", extensions: ["json"] },
+      { name: "TSV", extensions: ["tsv", "txt"] },
+      { name: "SQL (INSERT)", extensions: ["sql"] },
+      { name: "Markdown", extensions: ["md"] },
+    ]);
+    if (!path) return;
+    const lower = path.toLowerCase();
+    const fmt = lower.endsWith(".xlsx") ? "xlsx" : lower.endsWith(".json") ? "json"
+      : lower.endsWith(".md") ? "markdown" : lower.endsWith(".sql") ? "sql"
+      : lower.endsWith(".tsv") || lower.endsWith(".txt") ? "tsv" : "csv";
+    try {
+      const res = await api.exportRows(data.columns, rows, {
+        format: fmt,
+        include_header: true,
+        all_rows: true,
+        bom: fmt === "csv" || fmt === "tsv",
+        sql_table: fmt === "sql" ? tab.table : null,
+      }, path);
+      toast.success(`已匯出 ${res.rows} 列 · ${fmt.toUpperCase()}`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "匯出失敗");
+    }
+  };
+
   const submitInsert = async (row: RowInsert) => {
     setApplying(true);
     setErr(null);
@@ -1056,6 +1088,15 @@ function DataPane({ tab }: { tab: OpenTab }) {
         >
           <Icon icon={Plus} size={14} /> 新增列
         </button>
+        {marked.size > 0 && (
+          <button
+            onClick={exportMarked}
+            title="匯出已勾選的列（CSV / Excel / JSON / SQL…）"
+            className="px-2 py-1 rounded hover:bg-fg/10 text-fg/70 inline-flex items-center gap-1"
+          >
+            <Icon icon={Upload} size={14} /> 匯出選取（{marked.size}）
+          </button>
+        )}
         {editable && marked.size > 0 && (
           <button
             onClick={bulkDelete}
