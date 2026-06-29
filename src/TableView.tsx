@@ -1621,6 +1621,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
                 ...(sorts.length ? [["清除排序", async () => { if (await guardDiscard()) setSorts([]); }] as [string, () => void]] : []),
                 ["自動符合寬度", () => autoFitColumn(colMenu.col, colMenu.ci)],
                 ["複製欄名", () => copyToClipboard(colMenu.col, "已複製欄名")],
+                ["複製所有欄名（逗號分隔）", () => copyToClipboard(data.columns.join(", "), "已複製所有欄名")],
                 ["複製整欄（本頁）", () => copyToClipboard(data.rows.map((_, ri) => cellValue(ri, colMenu.ci) ?? "").join("\n"), "已複製整欄")],
                 ...(isSqlKind && connKind ? [["複製整欄為 IN(...)（本頁）", () => copyToClipboard(buildInClause(connKind, colMenu.col, data.rows.map((_, ri) => cellValue(ri, colMenu.ci))), "已複製 IN 子句")] as [string, () => void]] : []),
                 ...(isSqlKind ? [["欄位統計（總數/非空/相異）", () => colStats(colMenu.col)] as [string, () => void]] : []),
