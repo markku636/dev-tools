@@ -1,5 +1,11 @@
 # Changelog
 
+## 視覺化查詢建構器：計數（總列數）
+
+建構器右側面板新增「**計數**」鈕：把目前查詢包成 `COUNT(*)` 子查詢，立刻得知這查詢會回多少列（不必先「帶入編輯器」再手動改寫）。
+
+> 驗證：`buildCountQuery` 抽為 `sql.ts` 純函式（略去 LIMIT / OFFSET / ORDER）+ 1 項 vitest（共 161 項全通過）；前端 `tsc` + `eslint` + `vite build` 綠燈。
+
 ## SQL 片段庫擴充：反連接 / EXISTS / CASE / 分頁
 
 內建片段再加 4 個常用骨架：**反連接（找無對應的列）、EXISTS 子查詢、CASE WHEN 條件分類、LIMIT/OFFSET 分頁**——在編輯器輸入 `antijoin` / `exists` / `case` / `paginate` 即可展開。

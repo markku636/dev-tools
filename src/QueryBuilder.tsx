@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { api, DbKind, ErModel, ErTable, QueryResult } from "./api";
 import {
-  buildSelectQuery, formatSql, isSystemDatabase,
+  buildSelectQuery, buildCountQuery, formatSql, isSystemDatabase,
   type QbColumn, type QbJoin, type QbCond, type QbHaving, type QbOrder, type QbAgg, type QbJoinType, type QbConj,
 } from "./sql";
 import { Modal, Button, Select, Input, Icon, EmptyState } from "./ui/index";
@@ -239,6 +239,22 @@ export default function QueryBuilder({
     } catch (e: any) {
       setPreview(null);
       setPreviewErr(e?.message ?? "預覽失敗");
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  // 計數：把建構的查詢包成 COUNT(*) 得知總列數（略去 LIMIT/OFFSET/ORDER）。
+  const runCount = async () => {
+    if (!spec.baseTable || previewing) return;
+    const sql = buildCountQuery(kind, spec);
+    if (!sql) return;
+    setPreviewing(true); setPreviewErr(null);
+    try {
+      setPreview(await api.runQuery(connId, sql));
+    } catch (e: any) {
+      setPreview(null);
+      setPreviewErr(e?.message ?? "計數失敗");
     } finally {
       setPreviewing(false);
     }
@@ -489,9 +505,14 @@ export default function QueryBuilder({
         <div className="w-80 shrink-0 border-l border-fg/10 flex flex-col min-h-0">
           <div className="px-3 py-1.5 border-b border-fg/10 text-[11px] text-fg/40 flex items-center gap-1.5">
             <Icon icon={Wand2} size={12} />產生的 SQL
+            <button type="button" onClick={runCount} disabled={!generated || previewing}
+              title="計數：得知這查詢會回多少列（COUNT(*)，略去 LIMIT/OFFSET/ORDER）"
+              className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
+              <Icon icon={Sigma} size={11} />計數
+            </button>
             <button type="button" onClick={runPreview} disabled={!generated || previewing}
               title="在建構器內執行查詢看結果（套上預覽上限）"
-              className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
               <Icon icon={Play} size={11} />{previewing ? "預覽中…" : "預覽"}
             </button>
           </div>

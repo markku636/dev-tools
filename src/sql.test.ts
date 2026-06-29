@@ -72,6 +72,7 @@ import {
   isDangerousRedisCommand,
   lintSqlStructure,
   buildSelectQuery,
+  buildCountQuery,
   buildInClause,
   transformKeywordCase,
   mergeSnippets,
@@ -949,6 +950,16 @@ describe("buildSelectQuery（視覺化查詢建構器）", () => {
     expect(sql).toBe(
       'SELECT DISTINCT COUNT(DISTINCT "user_id") AS "buyers" FROM "shop"."orders" ORDER BY "user_id" DESC LIMIT 50;',
     );
+  });
+
+  it("buildCountQuery 包成 COUNT(*) 子查詢，並略去 LIMIT/OFFSET/ORDER", () => {
+    const sql = buildCountQuery("mysql", base({
+      columns: [{ table: "orders", column: "id" }],
+      limit: 10, offset: 5,
+      orders: [{ table: "orders", column: "id", dir: "ASC" }],
+    }));
+    expect(sql).toBe("SELECT COUNT(*) AS total FROM (SELECT `id` FROM `shop`.`orders`) AS _sub;");
+    expect(buildCountQuery("mysql", base({ baseTable: "" }))).toBe("");
   });
 
   it("OFFSET 接在 LIMIT 之後", () => {

@@ -738,6 +738,14 @@ export function buildInClause(kind: DbKind, column: string, values: (string | nu
   return inPart || `${col} IN (NULL)`; // 無值（理論上不會發生）→ 給合法但無相符的條件
 }
 
+// 把建構的查詢包成 `SELECT COUNT(*) … FROM (<查詢>) _sub`，用以得知「這查詢會回多少列」。
+// 計數時略去 LIMIT / OFFSET / ORDER BY（不影響列數、且部分方言子查詢不允許 ORDER 無 LIMIT）。
+export function buildCountQuery(kind: DbKind, spec: QbSpec): string {
+  const inner = buildSelectQuery(kind, { ...spec, limit: null, offset: null, orders: [] }).replace(/;\s*$/, "");
+  if (!inner) return "";
+  return `SELECT COUNT(*) AS total FROM (${inner}) AS _sub;`;
+}
+
 // ---- 查詢歷史（localStorage，最近在前，去重，上限 50）----
 export const QUERY_HISTORY_KEY = "db-kit:queryHistory";
 const QUERY_HISTORY_CAP = 50;
