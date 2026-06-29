@@ -1,5 +1,14 @@
 # Changelog
 
+## 視覺化查詢建構器：HAVING 群組後篩選
+
+查詢建構器補上 **HAVING** 子句——以聚合結果篩選分組（如 `COUNT(id) > 1`、`SUM(total) >= 100`），補齊「分組統計 → 篩出符合門檻的群組」這條 Navicat 常見路徑。
+
+> 驗證：`buildSelectQuery` 加 HAVING 支援並把聚合表達式抽成共用 `qbAggExpr`（SELECT / HAVING 共用）；+2 項 vitest（共 136 項全通過）；前端 `tsc` + `eslint` + `vite build` 綠燈。
+
+- **HAVING 區**（位於聚合 / 分組之後）：每列可選聚合函式（`COUNT / SUM / AVG / MIN / MAX / COUNT DISTINCT`，或留空＝直接以欄位比較）+ 表.欄 + 運算子 + 值，多列以各自 AND / OR 串接。
+- 產生順序正確：`GROUP BY` → `HAVING` → `ORDER BY` → `LIMIT`；數字值原樣、字串加引號（方言感知）。
+
 ## 資料傳輸：自動建立目標表（傳到全新資料庫）
 
 延伸上一版的資料傳輸——目標表不存在時，**沿用來源結構自動建表**再灌資料，於是可一鍵把表複製到全新的資料庫（限相同資料庫種類）。

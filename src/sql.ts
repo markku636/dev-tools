@@ -529,6 +529,8 @@ export interface QbTable { name: string; alias?: string }
 export interface QbColumn { table: string; column: string; agg?: QbAgg; alias?: string }
 export interface QbJoin { type: QbJoinType; leftTable: string; leftCol: string; rightTable: string; rightCol: string }
 export interface QbCond { table: string; column: string; op: string; value?: string; conj?: QbConj }
+// HAVING：以聚合（或欄位）為左運算元的群組後篩選。agg 空白＝直接以欄位比較。
+export interface QbHaving { agg?: QbAgg; table: string; column: string; op: string; value?: string; conj?: QbConj }
 export interface QbOrder { table: string; column: string; dir: "ASC" | "DESC" }
 export interface QbSpec {
   db: string;
@@ -537,9 +539,23 @@ export interface QbSpec {
   columns: QbColumn[];
   joins: QbJoin[];
   conds: QbCond[];
+  havings?: QbHaving[];
   orders: QbOrder[];
   distinct?: boolean;
   limit?: number | null;
+}
+
+// 聚合表達式：agg 空白回傳欄位參照本身，否則包上聚合函式。
+function qbAggExpr(agg: QbAgg | undefined, ref: string): string {
+  switch (agg) {
+    case "COUNT": return `COUNT(${ref})`;
+    case "COUNT_DISTINCT": return `COUNT(DISTINCT ${ref})`;
+    case "SUM": return `SUM(${ref})`;
+    case "AVG": return `AVG(${ref})`;
+    case "MIN": return `MIN(${ref})`;
+    case "MAX": return `MAX(${ref})`;
+    default: return ref;
+  }
 }
 
 // 是否為純數字字面值（整數 / 小數 / 負號）——是則 WHERE / IN 不加引號（當數值比較）。
@@ -576,17 +592,7 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
   // SELECT 清單
   const selectExprs: string[] = [];
   for (const c of spec.columns) {
-    const ref = colRef(c.table, c.column);
-    let expr: string;
-    switch (c.agg) {
-      case "COUNT": expr = `COUNT(${ref})`; break;
-      case "COUNT_DISTINCT": expr = `COUNT(DISTINCT ${ref})`; break;
-      case "SUM": expr = `SUM(${ref})`; break;
-      case "AVG": expr = `AVG(${ref})`; break;
-      case "MIN": expr = `MIN(${ref})`; break;
-      case "MAX": expr = `MAX(${ref})`; break;
-      default: expr = ref;
-    }
+    let expr = qbAggExpr(c.agg, colRef(c.table, c.column));
     if (c.alias?.trim()) expr += ` AS ${qi(c.alias.trim())}`;
     selectExprs.push(expr);
   }
@@ -634,6 +640,22 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
   if (hasAgg) {
     const grp = spec.columns.filter((c) => !c.agg).map((c) => colRef(c.table, c.column));
     if (grp.length) body += ` GROUP BY ${grp.join(", ")}`;
+  }
+
+  // HAVING（群組後篩選；左運算元為聚合表達式或欄位）
+  const havings = (spec.havings ?? []).filter((h) => h.table && h.column && h.op);
+  if (havings.length) {
+    const parts: string[] = [];
+    havings.forEach((h, i) => {
+      const expr = qbAggExpr(h.agg, colRef(h.table, h.column));
+      const op = h.op.toUpperCase();
+      const frag =
+        op === "IS NULL" || op === "IS NOT NULL"
+          ? `${expr} ${op}`
+          : `${expr} ${op} ${qbValueSql(kind, h.value ?? "")}`;
+      parts.push(i === 0 ? frag : `${h.conj ?? "AND"} ${frag}`);
+    });
+    body += ` HAVING ${parts.join(" ")}`;
   }
 
   // ORDER BY

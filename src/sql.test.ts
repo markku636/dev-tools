@@ -955,6 +955,34 @@ describe("buildSelectQuery（視覺化查詢建構器）", () => {
     }));
     expect(sql).toBe("SELECT * FROM `shop`.`orders` WHERE `path` = 'a\\\\b';");
   });
+
+  it("HAVING：聚合左運算元 + AND/OR 串接，置於 GROUP BY 之後 ORDER BY 之前", () => {
+    const sql = buildSelectQuery("mysql", base({
+      columns: [
+        { table: "orders", column: "status" },
+        { table: "orders", column: "id", agg: "COUNT", alias: "n" },
+      ],
+      havings: [
+        { agg: "COUNT", table: "orders", column: "id", op: ">", value: "5" },
+        { agg: "SUM", table: "orders", column: "total", op: ">=", value: "100", conj: "AND" },
+      ],
+      orders: [{ table: "orders", column: "status", dir: "ASC" }],
+    }));
+    expect(sql).toBe(
+      "SELECT `status`, COUNT(`id`) AS `n` FROM `shop`.`orders` GROUP BY `status` HAVING COUNT(`id`) > 5 AND SUM(`total`) >= 100 ORDER BY `status` ASC;",
+    );
+  });
+
+  it("HAVING：agg 空白＝以欄位本身比較；不完整的 HAVING 列被忽略", () => {
+    const sql = buildSelectQuery("postgres", base({
+      columns: [{ table: "orders", column: "status" }],
+      havings: [
+        { table: "orders", column: "status", op: "<>", value: "void" },
+        { agg: "COUNT", table: "orders", column: "", op: ">", value: "1" },
+      ],
+    }));
+    expect(sql).toBe('SELECT "status" FROM "shop"."orders" HAVING "status" <> \'void\';');
+  });
 });
 
 describe("SQL 片段庫（Snippets）", () => {

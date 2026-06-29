@@ -6,7 +6,7 @@ import {
 import { api, DbKind, ErModel, ErTable } from "./api";
 import {
   buildSelectQuery, formatSql, isSystemDatabase,
-  type QbColumn, type QbJoin, type QbCond, type QbOrder, type QbAgg, type QbJoinType, type QbConj,
+  type QbColumn, type QbJoin, type QbCond, type QbHaving, type QbOrder, type QbAgg, type QbJoinType, type QbConj,
 } from "./sql";
 import { Modal, Button, Select, Input, Icon, EmptyState } from "./ui/index";
 import { copyToClipboard } from "./ui";
@@ -35,6 +35,7 @@ const joinTypesFor = (kind: DbKind): QbJoinType[] =>
 interface SelCol extends QbColumn { id: string }
 interface SelJoin extends QbJoin { id: string }
 interface SelCond extends QbCond { id: string }
+interface SelHaving extends QbHaving { id: string }
 interface SelOrder extends QbOrder { id: string }
 
 export default function QueryBuilder({
@@ -58,6 +59,7 @@ export default function QueryBuilder({
   const [cols, setCols] = useState<SelCol[]>([]);
   const [joins, setJoins] = useState<SelJoin[]>([]);
   const [conds, setConds] = useState<SelCond[]>([]);
+  const [havings, setHavings] = useState<SelHaving[]>([]);
   const [orders, setOrders] = useState<SelOrder[]>([]);
   const [distinct, setDistinct] = useState(false);
   const [limit, setLimit] = useState<string>("100");
@@ -79,7 +81,7 @@ export default function QueryBuilder({
       .then((m) => {
         if (cancelled) return;
         setModel(m);
-        setPicked([]); setCols([]); setJoins([]); setConds([]); setOrders([]);
+        setPicked([]); setCols([]); setJoins([]); setConds([]); setHavings([]); setOrders([]);
       })
       .catch((e) => { if (!cancelled) { setErr(e?.message ?? "讀取結構失敗"); setModel(null); } })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -124,6 +126,7 @@ export default function QueryBuilder({
     setCols((c) => c.filter((x) => x.table !== name));
     setJoins((j) => j.filter((x) => x.leftTable !== name && x.rightTable !== name));
     setConds((c) => c.filter((x) => x.table !== name));
+    setHavings((h) => h.filter((x) => x.table !== name));
     setOrders((o) => o.filter((x) => x.table !== name));
   }
 
@@ -167,10 +170,11 @@ export default function QueryBuilder({
     columns: cols.map(({ table, column, agg, alias }) => ({ table, column, agg, alias })),
     joins: joins.map(({ type, leftTable, leftCol, rightTable, rightCol }) => ({ type, leftTable, leftCol, rightTable, rightCol })),
     conds: conds.map(({ table, column, op, value, conj }) => ({ table, column, op, value, conj })),
+    havings: havings.map(({ agg, table, column, op, value, conj }) => ({ agg, table, column, op, value, conj })),
     orders: orders.map(({ table, column, dir }) => ({ table, column, dir })),
     distinct,
     limit: limit.trim() === "" ? null : Number(limit),
-  }), [db, picked, cols, joins, conds, orders, distinct, limit]);
+  }), [db, picked, cols, joins, conds, havings, orders, distinct, limit]);
 
   const generated = useMemo(() => {
     const raw = buildSelectQuery(kind, spec);
@@ -358,6 +362,37 @@ export default function QueryBuilder({
                         onChange={(e) => setCols((cs) => cs.map((x) => x.id === c.id ? { ...x, alias: e.target.value } : x))} className="text-xs w-32" />
                     </div>
                   ))}
+                </div>
+              </section>
+
+              {/* HAVING（群組後篩選） */}
+              <section>
+                <SectionTitle icon={Filter} text="群組後篩選（HAVING）" hint="以聚合結果篩選分組，如 COUNT(id) > 1" />
+                <div className="space-y-1.5">
+                  {havings.map((h, i) => (
+                    <div key={h.id} className="flex items-center gap-1.5 text-xs flex-wrap">
+                      {i === 0 ? <span className="w-12 text-fg/40 text-[11px]">HAVING</span> : (
+                        <Select selectSize="sm" value={h.conj ?? "AND"} onChange={(e) => setHavings((hs) => hs.map((x) => x.id === h.id ? { ...x, conj: e.target.value as QbConj } : x))} className="text-xs w-12">
+                          <option value="AND">AND</option><option value="OR">OR</option>
+                        </Select>
+                      )}
+                      <Select selectSize="sm" value={h.agg ?? ""} onChange={(e) => setHavings((hs) => hs.map((x) => x.id === h.id ? { ...x, agg: e.target.value as QbAgg } : x))} className="text-xs w-32">
+                        {AGGS.map((a) => <option key={a.v} value={a.v}>{a.label}</option>)}
+                      </Select>
+                      <ColPicker tables={picked} colsOf={colsOf} table={h.table} column={h.column}
+                        onChange={(table, column) => setHavings((hs) => hs.map((x) => x.id === h.id ? { ...x, table, column } : x))} />
+                      <Select selectSize="sm" value={h.op} onChange={(e) => setHavings((hs) => hs.map((x) => x.id === h.id ? { ...x, op: e.target.value } : x))} className="text-xs w-24">
+                        {OPS.map((o) => <option key={o} value={o}>{o}</option>)}
+                      </Select>
+                      {h.op !== "IS NULL" && h.op !== "IS NOT NULL" && (
+                        <Input inputSize="sm" value={h.value ?? ""} placeholder="值"
+                          onChange={(e) => setHavings((hs) => hs.map((x) => x.id === h.id ? { ...x, value: e.target.value } : x))} className="text-xs w-32" />
+                      )}
+                      <button type="button" onClick={() => setHavings((hs) => hs.filter((x) => x.id !== h.id))} className="text-fg/30 hover:text-red-400"><Icon icon={Trash2} size={13} /></button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setHavings((hs) => [...hs, { id: uid(), agg: "COUNT", table: picked[0], column: colsOf(picked[0])[0] ?? "", op: ">", value: "", conj: "AND" }])}
+                    className="text-[11px] text-fg/50 hover:text-fg inline-flex items-center gap-1"><Icon icon={Plus} size={11} />新增 HAVING 條件</button>
                 </div>
               </section>
 
