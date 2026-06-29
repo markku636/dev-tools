@@ -63,6 +63,22 @@ describe("buildSyncDml", () => {
     const sql = buildSyncDml("mysql", "shop", "fruit", src, d, false);
     expect(sql).not.toContain("DELETE");
   });
+  it("複合主鍵：UPDATE / DELETE 的 WHERE 以多個主鍵欄位 AND 串接", () => {
+    const s2: RowSet = {
+      columns: ["a", "b", "v"], pk: ["a", "b"],
+      rows: [["1", "x", "new"], ["2", "y", "ins"]], // (1,x) 值改、(2,y) 新增
+    };
+    const t2: RowSet = {
+      columns: ["a", "b", "v"], pk: ["a", "b"],
+      rows: [["1", "x", "old"], ["9", "z", "del"]], // (1,x) 舊值、(9,z) 待刪
+    };
+    const d = diffRowsByPk(s2, t2);
+    const sql = buildSyncDml("mysql", "d", "t", s2, d, true);
+    expect(sql).toContain("INSERT INTO `d`.`t` (`a`, `b`, `v`) VALUES ('2', 'y', 'ins');");
+    expect(sql).toContain("UPDATE `d`.`t` SET `v` = 'new' WHERE `a` = '1' AND `b` = 'x';");
+    expect(sql).toContain("DELETE FROM `d`.`t` WHERE `a` = '9' AND `b` = 'z';");
+  });
+
   it("targetColumns 限定：只同步交集欄位（目標缺 qty → INSERT/UPDATE 不含 qty）", () => {
     const d = diffRowsByPk(src, dst);
     // 目標只有 id, name（無 qty）。
