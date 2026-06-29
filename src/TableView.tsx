@@ -1487,7 +1487,7 @@ function DataPane({ tab }: { tab: OpenTab }) {
           {applying
             ? "處理中…"
             : data
-            ? `顯示 ${data.rows.length ? startRow + 1 : 0}–${startRow + data.rows.length} · 共 ${data.total_rows} 列${editable ? "" : " · 無主鍵唯讀"}`
+            ? `顯示 ${data.rows.length ? startRow + 1 : 0}–${startRow + data.rows.length} · 共 ${data.total_rows} 列${editable ? "" : readonly ? " · 連線唯讀" : " · 無主鍵唯讀"}`
             : loading
             ? "讀取中…"
             : ""}
