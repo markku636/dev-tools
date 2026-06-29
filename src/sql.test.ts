@@ -73,6 +73,7 @@ import {
   isDangerousRedisCommand,
   lintSqlStructure,
   buildSelectQuery,
+  isStringLikeType,
   buildCountQuery,
   minifySql,
   extractNamedParams,
@@ -1014,6 +1015,26 @@ describe("buildSelectQuery（視覺化查詢建構器）", () => {
       'GROUP BY "users"."name" HAVING COUNT("orders"."id") > 1 ' +
       'ORDER BY "users"."name" ASC LIMIT 20 OFFSET 40;',
     );
+  });
+
+  it("stringCol：字串 / 日期欄的數字樣式值加引號；數值欄維持原樣", () => {
+    // 文字欄（stringCol=true）：'5' 加引號（避免 PG text = 5 型別錯）。
+    expect(buildSelectQuery("postgres", base({
+      conds: [{ table: "orders", column: "code", op: "=", value: "5", stringCol: true }],
+    }))).toBe('SELECT * FROM "shop"."orders" WHERE "code" = \'5\';');
+    // 數值欄（stringCol=false / 省略）：原樣。
+    expect(buildSelectQuery("postgres", base({
+      conds: [{ table: "orders", column: "id", op: "=", value: "5", stringCol: false }],
+    }))).toBe('SELECT * FROM "shop"."orders" WHERE "id" = 5;');
+  });
+
+  it("isStringLikeType：數值型別 false、字串 / 日期 / 布林 true", () => {
+    for (const t of ["int", "int(11)", "integer", "bigint", "int4", "decimal(10,2)", "numeric", "float", "double precision", "serial"]) {
+      expect(isStringLikeType(t)).toBe(false);
+    }
+    for (const t of ["varchar(50)", "text", "char(2)", "timestamp", "date", "time", "boolean", "uuid", "jsonb", "interval", "money", "bytea"]) {
+      expect(isStringLikeType(t)).toBe(true);
+    }
   });
 
   it("LIKE 值恆為字串字面值（即使看似數字；避免 PostgreSQL 型別錯）", () => {

@@ -528,9 +528,22 @@ export type QbConj = "AND" | "OR";
 export interface QbTable { name: string; alias?: string }
 export interface QbColumn { table: string; column: string; agg?: QbAgg; alias?: string }
 export interface QbJoin { type: QbJoinType; leftTable: string; leftCol: string; rightTable: string; rightCol: string }
-export interface QbCond { table: string; column: string; op: string; value?: string; conj?: QbConj }
+// stringCol：此欄是否為「非數值型別」（字串 / 日期 / 布林…），是則值恆加引號（避免 `text = 5` 在 PG 型別錯）。
+export interface QbCond { table: string; column: string; op: string; value?: string; conj?: QbConj; stringCol?: boolean }
 // HAVING：以聚合（或欄位）為左運算元的群組後篩選。agg 空白＝直接以欄位比較。
-export interface QbHaving { agg?: QbAgg; table: string; column: string; op: string; value?: string; conj?: QbConj }
+export interface QbHaving { agg?: QbAgg; table: string; column: string; op: string; value?: string; conj?: QbConj; stringCol?: boolean }
+
+// 由資料型別字串判斷是否「非數值」（供查詢建構器決定條件值是否加引號）。
+// 第一個型別字（int / varchar / timestamp…）不在數值集合即視為字串型（恆加引號）。
+const NUMERIC_TYPE_TOKENS = new Set([
+  "int", "integer", "tinyint", "smallint", "mediumint", "bigint", "int2", "int4", "int8",
+  "decimal", "numeric", "number", "dec", "float", "float4", "float8", "double", "real",
+  "serial", "bigserial", "smallserial",
+]);
+export function isStringLikeType(dataType: string): boolean {
+  const tok = (dataType.trim().toLowerCase().match(/^[a-z_]+/) || [""])[0];
+  return !NUMERIC_TYPE_TOKENS.has(tok);
+}
 export interface QbOrder { table: string; column: string; dir: "ASC" | "DESC" }
 export interface QbSpec {
   db: string;
@@ -575,9 +588,9 @@ function qbValueSql(kind: DbKind, v: string): string {
 
 // 依運算子決定條件值寫法：LIKE 系列恆為字串字面值（即使值看似數字——LIKE 需字串樣式，
 // 否則 PostgreSQL 會型別錯）；其餘走 qbValueSql（數字原樣 / 字串字面值）。
-function qbOperandValue(kind: DbKind, op: string, v: string): string {
+function qbOperandValue(kind: DbKind, op: string, v: string, stringCol?: boolean): string {
   const u = op.trim().toUpperCase();
-  if (u === "LIKE" || u === "NOT LIKE" || u === "ILIKE" || u === "NOT ILIKE") return sqlLiteral(kind, v.trim());
+  if (stringCol || u === "LIKE" || u === "NOT LIKE" || u === "ILIKE" || u === "NOT ILIKE") return sqlLiteral(kind, v.trim());
   return qbValueSql(kind, v);
 }
 
@@ -646,10 +659,10 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
           .split(",")
           .map((s) => s.trim())
           .filter((s) => s.length > 0)
-          .map((s) => qbValueSql(kind, s));
+          .map((s) => (c.stringCol ? sqlLiteral(kind, s) : qbValueSql(kind, s)));
         frag = `${ref} ${op} (${items.join(", ")})`;
       } else {
-        frag = `${ref} ${op} ${qbOperandValue(kind, op, c.value ?? "")}`;
+        frag = `${ref} ${op} ${qbOperandValue(kind, op, c.value ?? "", c.stringCol)}`;
       }
       parts.push(i === 0 ? frag : `${c.conj ?? "AND"} ${frag}`);
     });
@@ -673,7 +686,8 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
       const frag =
         op === "IS NULL" || op === "IS NOT NULL"
           ? `${expr} ${op}`
-          : `${expr} ${op} ${qbOperandValue(kind, op, h.value ?? "")}`;
+          // 有聚合（COUNT/SUM…）時左運算元為數值，值用數字原樣；無聚合（純欄位）則依 stringCol。
+          : `${expr} ${op} ${qbOperandValue(kind, op, h.value ?? "", h.agg ? false : h.stringCol)}`;
       parts.push(i === 0 ? frag : `${h.conj ?? "AND"} ${frag}`);
     });
     body += ` HAVING ${parts.join(" ")}`;

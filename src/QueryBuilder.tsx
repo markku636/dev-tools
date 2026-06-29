@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { api, DbKind, ErModel, ErTable, QueryResult } from "./api";
 import {
-  buildSelectQuery, buildCountQuery, formatSql, isSystemDatabase,
+  buildSelectQuery, buildCountQuery, formatSql, isSystemDatabase, isStringLikeType,
   type QbColumn, type QbJoin, type QbCond, type QbHaving, type QbOrder, type QbAgg, type QbJoinType, type QbConj,
 } from "./sql";
 import { Modal, Button, Select, Input, Icon, EmptyState } from "./ui/index";
@@ -108,6 +108,11 @@ export default function QueryBuilder({
 
   const tableByName = (n: string): ErTable | undefined => model?.tables.find((t) => t.name === n);
   const colsOf = (n: string): string[] => tableByName(n)?.columns.map((c) => c.name) ?? [];
+  // 此欄是否為非數值型別（字串 / 日期…）→ 條件值需加引號，避免 `text = 5` 在 PostgreSQL 型別錯。
+  const colIsString = (table: string, column: string): boolean => {
+    const dt = tableByName(table)?.columns.find((c) => c.name === column)?.data_type;
+    return dt ? isStringLikeType(dt) : false;
+  };
 
   // 在已選表之間（含與新表）尋找外鍵關係，用於自動 JOIN 推斷。
   const relationBetween = (a: string, b: string) =>
@@ -199,13 +204,15 @@ export default function QueryBuilder({
     tables: picked.map((name) => ({ name })),
     columns: cols.map(({ table, column, agg, alias }) => ({ table, column, agg, alias })),
     joins: joins.map(({ type, leftTable, leftCol, rightTable, rightCol }) => ({ type, leftTable, leftCol, rightTable, rightCol })),
-    conds: conds.map(({ table, column, op, value, conj }) => ({ table, column, op, value, conj })),
-    havings: havings.map(({ agg, table, column, op, value, conj }) => ({ agg, table, column, op, value, conj })),
+    conds: conds.map(({ table, column, op, value, conj }) => ({ table, column, op, value, conj, stringCol: colIsString(table, column) })),
+    havings: havings.map(({ agg, table, column, op, value, conj }) => ({ agg, table, column, op, value, conj, stringCol: colIsString(table, column) })),
     orders: orders.map(({ table, column, dir }) => ({ table, column, dir })),
     distinct,
     limit: limit.trim() === "" ? null : Number(limit),
     offset: offset.trim() === "" ? null : Number(offset),
-  }), [db, picked, cols, joins, conds, havings, orders, distinct, limit, offset]);
+    // colIsString 讀 model；model 在有條件時已穩定（載入時會重置條件），故不入相依以保留記憶化。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [db, picked, cols, joins, conds, havings, orders, distinct, limit, offset, model]);
 
   const generated = useMemo(() => {
     const raw = buildSelectQuery(kind, spec);
