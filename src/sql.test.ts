@@ -7,6 +7,7 @@ import {
   buildUseDatabase,
   parseClipboardGrid,
   rectToTsv,
+  rectToMarkdown,
   rangeStats,
   resultToCsv,
   resultToTsv,
@@ -286,6 +287,20 @@ describe("rectToTsv", () => {
   });
   it("single cell → just that value", () => {
     expect(rectToTsv(get, [2], [1])).toBe("b3");
+  });
+});
+
+describe("rectToMarkdown", () => {
+  const grid = [["a1", "b1"], ["a2", null]];
+  const get = (r: number, c: number) => grid[r][c];
+  const header = (c: number) => (c === 0 ? "A" : "B|x");
+  it("組出含表頭與分隔列的 Markdown 表格；NULL→空、| 跳脫", () => {
+    expect(rectToMarkdown(get, [0, 1], [0, 1], header)).toBe(
+      "| A | B\\|x |\n| --- | --- |\n| a1 | b1 |\n| a2 |  |",
+    );
+  });
+  it("無資料列時仍輸出表頭 + 分隔列", () => {
+    expect(rectToMarkdown(get, [], [0], header)).toBe("| A |\n| --- |");
   });
 });
 

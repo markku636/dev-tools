@@ -1278,6 +1278,20 @@ export function rectToTsv(
   return rows.map((r) => cols.map((c) => getCell(r, c) ?? "").join("\t")).join("\n");
 }
 
+// 把框選矩形組成 Markdown 表格（含表頭列）。NULL → 空字串；`|` / 換行跳脫，供貼進文件 / PR。
+export function rectToMarkdown(
+  getCell: (r: number, c: number) => string | null,
+  rows: number[],
+  cols: number[],
+  header: (c: number) => string,
+): string {
+  const esc = (s: string) => s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  const head = `| ${cols.map((c) => esc(header(c))).join(" | ")} |`;
+  const sep = `| ${cols.map(() => "---").join(" | ")} |`;
+  const body = rows.map((r) => `| ${cols.map((c) => esc(getCell(r, c) ?? "")).join(" | ")} |`).join("\n");
+  return body ? `${head}\n${sep}\n${body}` : `${head}\n${sep}`;
+}
+
 // 解析剪貼簿的表格文字（TSV / 多行）為二維字串陣列，供資料表「區塊貼上」。
 // 去除尾端單一換行（避免多出一列空白）；單一純文字回傳 1×1。
 export function parseClipboardGrid(text: string): string[][] {

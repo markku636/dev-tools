@@ -12,7 +12,7 @@ import {
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard, pickSaveFile, useModalCount, useModalOverlay } from "./ui";
-import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rangeStats, buildInClause, buildInsertValues, TYPE_PRESETS } from "./sql";
+import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rectToMarkdown, rangeStats, buildInClause, buildInsertValues, TYPE_PRESETS } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import RedisKeyTree from "./RedisKeyTree";
@@ -693,7 +693,10 @@ function DataPane({ tab }: { tab: OpenTab }) {
       ["複製值", () => copyCell(r, c), false],
       // 右鍵落在框選範圍內：提供整塊複製（滑鼠路徑，與 Ctrl+C 一致）。
       ...(rangeEnd && inRange(r, c)
-        ? [["複製範圍 (TSV)", () => copyRange(), false] as [string, () => void, boolean]]
+        ? [
+            ["複製範圍 (TSV)", () => copyRange(), false] as [string, () => void, boolean],
+            ["複製範圍 (Markdown)", () => copyRangeMarkdown(), false] as [string, () => void, boolean],
+          ]
         : []),
       ["複製整列 (JSON)", () => copyRowJson(r), false],
       ["複製整列 (TSV)", () => copyRowTsv(r), false],
@@ -762,6 +765,15 @@ function DataPane({ tab }: { tab: OpenTab }) {
     if (!b) return;
     const rows = Array.from({ length: b.r2 - b.r1 + 1 }, (_, k) => b.r1 + k);
     copyToClipboard(rectToTsv((rr, cc) => cellValue(rr, cc), rows, b.cols), `已複製 ${rows.length}×${b.cols.length} 區塊 (TSV)`);
+  };
+  const copyRangeMarkdown = () => {
+    const b = rangeBounds();
+    if (!b || !data) return;
+    const rows = Array.from({ length: b.r2 - b.r1 + 1 }, (_, k) => b.r1 + k);
+    copyToClipboard(
+      rectToMarkdown((rr, cc) => cellValue(rr, cc), rows, b.cols, (c) => data.columns[c]),
+      `已複製 ${rows.length}×${b.cols.length} 區塊 (Markdown)`,
+    );
   };
   const nullRange = () => {
     const b = rangeBounds();
