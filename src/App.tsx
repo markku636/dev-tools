@@ -2993,6 +2993,11 @@ function QueryPane() {
                 <Icon icon={GitBranch} size={13} />視覺化解釋
               </button>
             )}
+            {supportsExplain && extractNamedParams(sql).length > 0 && (
+              <span className="text-[11px] text-sky-300/80 px-1" title="偵測到具名參數 :name；執行時會逐一提示輸入並安全代入">
+                ⟨{extractNamedParams(sql).length} 參數⟩
+              </span>
+            )}
             <button type="button" onClick={() => execute("run")} disabled={running}
               title="執行 (F6 / Ctrl+Enter)；若有反白選取，只執行選取段"
               className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-600/80 hover:bg-green-600 disabled:opacity-50">
