@@ -573,6 +573,14 @@ function qbValueSql(kind: DbKind, v: string): string {
   return isNumericLiteral(t) ? t : sqlLiteral(kind, t);
 }
 
+// 依運算子決定條件值寫法：LIKE 系列恆為字串字面值（即使值看似數字——LIKE 需字串樣式，
+// 否則 PostgreSQL 會型別錯）；其餘走 qbValueSql（數字原樣 / 字串字面值）。
+function qbOperandValue(kind: DbKind, op: string, v: string): string {
+  const u = op.trim().toUpperCase();
+  if (u === "LIKE" || u === "NOT LIKE" || u === "ILIKE" || u === "NOT ILIKE") return sqlLiteral(kind, v.trim());
+  return qbValueSql(kind, v);
+}
+
 /**
  * 由視覺建構規格組出 SELECT 語句（單行，呼叫端可再以 formatSql 美化）。
  * - 多表時欄位以「表別名/表名.欄名」限定，避免歧義。
@@ -641,7 +649,7 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
           .map((s) => qbValueSql(kind, s));
         frag = `${ref} ${op} (${items.join(", ")})`;
       } else {
-        frag = `${ref} ${op} ${qbValueSql(kind, c.value ?? "")}`;
+        frag = `${ref} ${op} ${qbOperandValue(kind, op, c.value ?? "")}`;
       }
       parts.push(i === 0 ? frag : `${c.conj ?? "AND"} ${frag}`);
     });
@@ -665,7 +673,7 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
       const frag =
         op === "IS NULL" || op === "IS NOT NULL"
           ? `${expr} ${op}`
-          : `${expr} ${op} ${qbValueSql(kind, h.value ?? "")}`;
+          : `${expr} ${op} ${qbOperandValue(kind, op, h.value ?? "")}`;
       parts.push(i === 0 ? frag : `${h.conj ?? "AND"} ${frag}`);
     });
     body += ` HAVING ${parts.join(" ")}`;

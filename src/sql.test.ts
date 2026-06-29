@@ -1016,6 +1016,21 @@ describe("buildSelectQuery（視覺化查詢建構器）", () => {
     );
   });
 
+  it("LIKE 值恆為字串字面值（即使看似數字；避免 PostgreSQL 型別錯）", () => {
+    // 數字樣式的 LIKE 值也要加引號（col LIKE '12%'，非 col LIKE 12）。
+    expect(buildSelectQuery("postgres", base({
+      conds: [{ table: "orders", column: "code", op: "LIKE", value: "12%" }],
+    }))).toBe('SELECT * FROM "shop"."orders" WHERE "code" LIKE \'12%\';');
+    // 純數字的 LIKE 值仍加引號。
+    expect(buildSelectQuery("mysql", base({
+      conds: [{ table: "orders", column: "code", op: "NOT LIKE", value: "123" }],
+    }))).toBe("SELECT * FROM `shop`.`orders` WHERE `code` NOT LIKE '123';");
+    // 非 LIKE 的數字比較仍原樣。
+    expect(buildSelectQuery("mysql", base({
+      conds: [{ table: "orders", column: "total", op: ">", value: "100" }],
+    }))).toBe("SELECT * FROM `shop`.`orders` WHERE `total` > 100;");
+  });
+
   it("OFFSET 接在 LIMIT 之後", () => {
     const sql = buildSelectQuery("mysql", base({ limit: 50, offset: 100 }));
     expect(sql).toBe("SELECT * FROM `shop`.`orders` LIMIT 50 OFFSET 100;");
