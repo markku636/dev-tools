@@ -47,7 +47,7 @@ import {
   buildDropTable, buildDropView, buildDropRoutine, buildTruncateTable, buildRenameTable, buildDuplicateTable, isSystemDatabase,
   buildTableMaintenance, buildInsertAllRows, tableSizesSql,
   buildDeleteAllRows, buildInsertValues, buildGrantTemplate,
-  formatSql, buildUseDatabase, hasExecutableSql,
+  formatSql, transformKeywordCase, buildUseDatabase, hasExecutableSql,
 } from "./sql";
 import type { SavedQuery } from "./sql";
 import Select from "./ui/Select";
@@ -2906,6 +2906,16 @@ function QueryPane() {
                 className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
                 <Icon icon={Wand2} size={13} />格式化
               </button>
+            )}
+            {supportsExplain && (
+              <div className="inline-flex rounded border border-fg/15 overflow-hidden">
+                <button type="button" onClick={() => persistSql(transformKeywordCase(sql, true))} disabled={running || !sql.trim()}
+                  title="關鍵字轉大寫（字串 / 註解 / 識別字不動）"
+                  className="text-xs px-2 py-1 hover:bg-fg/10 text-fg/70 disabled:opacity-40">ABC</button>
+                <button type="button" onClick={() => persistSql(transformKeywordCase(sql, false))} disabled={running || !sql.trim()}
+                  title="關鍵字轉小寫（字串 / 註解 / 識別字不動）"
+                  className="text-xs px-2 py-1 border-l border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">abc</button>
+              </div>
             )}
             {supportsExplain && (
               <button type="button" onClick={() => execute("analyze")} disabled={running}

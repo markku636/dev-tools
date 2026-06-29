@@ -1,5 +1,14 @@
 # Changelog
 
+## SQL 關鍵字大小寫轉換（致敬 Navicat 編輯器）
+
+查詢工具列新增 **ABC / abc** 兩鈕：把 SQL 關鍵字一鍵統一轉大寫 / 小寫，符合團隊風格。
+
+> 驗證：`transformKeywordCase` 抽為 `sql.ts` 純函式 + 5 項 vitest（共 156 項全通過）；前端 `tsc` + `eslint` + `vite build` 綠燈。
+
+- **只動關鍵字**：子句 / 運算子 / DML / DDL 字（`SELECT FROM WHERE JOIN GROUP BY HAVING INSERT UPDATE…`）；**字串、行 / 區塊註解、`$$` 內容、識別字（含反引號 / 雙引號）一律不動**。
+- 刻意**排除型別名與常見欄名**（`date / text / timestamp…`），避免把欄位誤改大小寫。
+
 ## 反向外鍵導覽：尋找參照此列的列
 
 補齊外鍵雙向導覽：**主鍵欄位的儲存格右鍵新增「尋找參照此列的列…」**——找出哪些表以外鍵指向這一列，一鍵開啟並過濾出參照它的子列（如從某筆使用者跳到他的所有訂單）。

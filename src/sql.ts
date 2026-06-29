@@ -670,6 +670,54 @@ export function buildSelectQuery(kind: DbKind, spec: QbSpec): string {
   return `SELECT ${spec.distinct ? "DISTINCT " : ""}${selectList} ${body};`;
 }
 
+// SQL 關鍵字（子句 / 運算子 / DML / DDL）。刻意不含型別名（date/text/timestamp…）與常見欄名，
+// 避免把欄位 / 識別字誤改大小寫。供「關鍵字大寫 / 小寫」轉換。
+const SQL_KEYWORDS = [
+  "select", "from", "where", "and", "or", "not", "null", "is", "in", "like", "ilike", "between",
+  "join", "inner", "left", "right", "full", "outer", "cross", "on", "using",
+  "group", "by", "having", "order", "asc", "desc", "limit", "offset",
+  "union", "intersect", "except", "all", "distinct", "as",
+  "insert", "into", "values", "update", "set", "delete",
+  "create", "table", "view", "index", "drop", "alter", "add", "column", "rename", "to",
+  "primary", "key", "foreign", "references", "unique", "default", "constraint", "check", "cascade",
+  "case", "when", "then", "else", "end", "exists", "any", "some",
+  "with", "returning", "truncate", "replace", "if", "begin", "commit", "rollback",
+  "grant", "revoke", "on", "use", "explain", "analyze",
+];
+const KW_RE = new RegExp(`\\b(${SQL_KEYWORDS.join("|")})\\b`, "gi");
+
+// 內部：切出「程式碼 / 字串・註解」段（與 formatSql 同策略：保留字串 / 行 / 區塊註解 / $$ 內容不變）。
+function sqlCodeSegments(sql: string): { code: boolean; v: string }[] {
+  const segs: { code: boolean; v: string }[] = [];
+  let code = "";
+  let i = 0;
+  const n = sql.length;
+  const flush = () => { if (code) { segs.push({ code: true, v: code }); code = ""; } };
+  while (i < n) {
+    const ch = sql[i];
+    const two = sql.slice(i, i + 2);
+    if (ch === "'" || ch === '"' || ch === "`") {
+      flush();
+      let j = i + 1;
+      while (j < n) { if (sql[j] === ch) { if (sql[j + 1] === ch) { j += 2; continue; } j++; break; } j++; }
+      segs.push({ code: false, v: sql.slice(i, j) }); i = j; continue;
+    }
+    if (two === "--") { flush(); let j = i; while (j < n && sql[j] !== "\n") j++; segs.push({ code: false, v: sql.slice(i, j) }); i = j; continue; }
+    if (two === "/*") { flush(); let j = i + 2; while (j < n && sql.slice(j, j + 2) !== "*/") j++; j = Math.min(n, j + 2); segs.push({ code: false, v: sql.slice(i, j) }); i = j; continue; }
+    if (two === "$$") { flush(); let j = i + 2; while (j < n && sql.slice(j, j + 2) !== "$$") j++; j = Math.min(n, j + 2); segs.push({ code: false, v: sql.slice(i, j) }); i = j; continue; }
+    code += ch; i++;
+  }
+  flush();
+  return segs;
+}
+
+// 把 SQL 關鍵字統一轉大寫 / 小寫（字串 / 註解內不動，識別字 / 型別名不動）。
+export function transformKeywordCase(sql: string, upper: boolean): string {
+  return sqlCodeSegments(sql)
+    .map((s) => (s.code ? s.v.replace(KW_RE, (m) => (upper ? m.toUpperCase() : m.toLowerCase())) : s.v))
+    .join("");
+}
+
 // 由欄名 + 一組值組出 `col IN ('a', 'b', …)`（致敬 Navicat「Copy as IN」），供貼進 WHERE 過濾。
 // 去重、方言感知跳脫；純數字原樣（數值比較）；NULL 以 `col IS NULL` 並聯（IN 不含 NULL）。
 export function buildInClause(kind: DbKind, column: string, values: (string | null)[]): string {

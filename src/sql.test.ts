@@ -73,6 +73,7 @@ import {
   lintSqlStructure,
   buildSelectQuery,
   buildInClause,
+  transformKeywordCase,
   mergeSnippets,
   upsertSnippet,
   removeSnippet,
@@ -983,6 +984,30 @@ describe("buildSelectQuery（視覺化查詢建構器）", () => {
       ],
     }));
     expect(sql).toBe('SELECT "status" FROM "shop"."orders" HAVING "status" <> \'void\';');
+  });
+});
+
+describe("transformKeywordCase（關鍵字大小寫）", () => {
+  it("關鍵字轉大寫，識別字 / 值不變", () => {
+    expect(transformKeywordCase("select id from users where id = 1", true))
+      .toBe("SELECT id FROM users WHERE id = 1");
+  });
+  it("轉小寫（識別字 T 不動）", () => {
+    expect(transformKeywordCase("SELECT * FROM T ORDER BY id DESC", false))
+      .toBe("select * from T order by id desc");
+  });
+  it("字串 / 註解內的關鍵字不動", () => {
+    expect(transformKeywordCase("select 'from where' -- from\nfrom t", true))
+      .toBe("SELECT 'from where' -- from\nFROM t");
+  });
+  it("反引號 / 雙引號識別字內不動（即使字面是關鍵字）", () => {
+    expect(transformKeywordCase("select `from` from `order`", true))
+      .toBe("SELECT `from` FROM `order`");
+  });
+  it("非關鍵字（型別名 / 一般欄名）不動", () => {
+    // date / text 不在關鍵字集合 → 保持原樣，避免誤改欄名。
+    expect(transformKeywordCase("select date, text from t", true))
+      .toBe("SELECT date, text FROM t");
   });
 });
 
