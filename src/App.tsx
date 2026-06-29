@@ -1189,16 +1189,12 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
         if (onePage) {
           add(first.rows);
         } else {
-          // 跨頁 OFFSET 分頁需穩定排序，否則可能漏列 / 重複。有主鍵則以主鍵排序自第 0 頁重抓；
-          // 無主鍵則無法保證順序，沿用無排序並提醒改用「備份」做完整匯出。
-          if (pk.length === 0) toast.info("此表無主鍵，跨頁傾印可能漏列 / 重複；建議用「備份」做完整匯出。");
-          const sorts = pk.map((c) => ({ column: c, dir: "asc" as const }));
+          // 跨頁 OFFSET 分頁需穩定排序，否則可能漏列 / 重複。有主鍵則以主鍵排序，
+          // 無主鍵則以全部欄位排序，皆自第 0 頁以該排序重抓，確保各頁順序一致。
+          const sorts = (pk.length ? pk : cols).map((c) => ({ column: c, dir: "asc" as const }));
           let page = 0;
           while (total < MAX) {
-            // 無排序時可重用已抓的第一頁，避免重複請求。
-            const pd = page === 0 && sorts.length === 0
-              ? first
-              : await api.tableData(m.connId, m.db, m.table, { page, page_size: PAGE, filters: [], sorts });
+            const pd = await api.tableData(m.connId, m.db, m.table, { page, page_size: PAGE, filters: [], sorts });
             add(pd.rows);
             if (pd.rows.length < PAGE) break;
             page += 1;
