@@ -32,6 +32,7 @@ import DataDictionary from "./DataDictionary";
 import DataGenerator from "./DataGenerator";
 import QueryBuilder from "./QueryBuilder";
 import TransferDialog from "./TransferDialog";
+import DbTransferDialog from "./DbTransferDialog";
 import { loadConnColors, persistConnColors, setConnColor, CONN_COLOR_PALETTE } from "./connColors";
 import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile, pickOpenFile, useEscToClose } from "./ui";
 import {
@@ -673,6 +674,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
   const [exportTbl, setExportTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
   const [transferTbl, setTransferTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
   const [builderTbl, setBuilderTbl] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
+  const [dbTransfer, setDbTransfer] = useState<{ connId: string; db: string } | null>(null);
   const [dataDict, setDataDict] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
   const [dataGen, setDataGen] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
   const [erTable, setErTable] = useState<{ connId: string; db: string; table: string } | null>(null);
@@ -1727,6 +1729,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
                         connId: dbMenu.connId, title: `資料表大小：${dbMenu.db}`, sql: tableSizesSql(dbMenu.db),
                       }), false]);
                       if ((k === "mysql" || k === "postgres") && dbConn) arr.push(["結構比對…", () => setSchemaCompare({ connId: dbMenu.connId, db: dbMenu.db, kind: dbConn.kind }), false]);
+                      if (k === "mysql" || k === "postgres" || k === "sqlite") arr.push(["資料傳輸（整庫）…", () => setDbTransfer({ connId: dbMenu.connId, db: dbMenu.db }), false]);
                       if (k === "mysql") arr.push(["資料庫屬性…", () => setDbProps({ connId: dbMenu.connId, db: dbMenu.db }), false]);
                       arr.push(["編輯屬性…", editConn, false]);
                       // 系統 schema / 庫，以及 MySQL 使用中的預設庫，不顯示刪除（後端亦硬擋）。
@@ -1888,6 +1891,10 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
         <QueryBuilder connId={builderTbl.connId} kind={builderTbl.kind} initialDb={builderTbl.db} initialTable={builderTbl.table}
           onClose={() => setBuilderTbl(null)}
           onUse={(sql) => { sendQuery(builderTbl.connId, sql); setBuilderTbl(null); }} />
+      )}
+
+      {dbTransfer && (
+        <DbTransferDialog connId={dbTransfer.connId} database={dbTransfer.db} onClose={() => setDbTransfer(null)} />
       )}
 
       {dataDict && (
