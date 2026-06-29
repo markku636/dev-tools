@@ -1072,6 +1072,11 @@ describe("isWriteStatement（唯讀攔截）", () => {
     expect(isWriteStatement("EXPLAIN SELECT 1")).toBe(false);
     expect(isWriteStatement("WITH x AS (SELECT 1) SELECT * FROM x")).toBe(false);
   });
+  it("可寫 CTE（WITH … DELETE/UPDATE/INSERT …）視為寫入（唯讀守門）", () => {
+    expect(isWriteStatement("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d")).toBe(true);
+    expect(isWriteStatement("with u as (update t set a=1 returning id) select * from u")).toBe(true);
+    expect(isWriteStatement("WITH i AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM i")).toBe(true);
+  });
   it("寫入 / DDL 語句為 true", () => {
     expect(isWriteStatement("INSERT INTO t VALUES (1)")).toBe(true);
     expect(isWriteStatement("update t set a=1")).toBe(true);

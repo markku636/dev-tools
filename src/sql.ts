@@ -802,6 +802,9 @@ export function isWriteStatement(sql: string): boolean {
     s = t;
     break;
   }
+  // PostgreSQL 可寫 CTE：`WITH x AS (DELETE/UPDATE/INSERT …) …` 起始為 WITH，第一關鍵字看不出寫入。
+  // 唯讀守門寧可多擋：起始為 WITH 且含寫入字樣即視為寫入。
+  if (/^with\b/i.test(s)) return /\b(insert|update|delete|merge)\b/i.test(s);
   return /^(insert|update|delete|replace|merge|upsert|create|alter|drop|truncate|rename|grant|revoke|comment|call|do|set|lock|begin|start|commit|rollback|savepoint|vacuum|reindex|cluster|copy|load|import)\b/i.test(s);
 }
 
