@@ -416,6 +416,13 @@ describe("cross-DB quoting", () => {
     // 反斜線後接單引號：MySQL 需各自轉義。
     expect(sqlLiteral("mysql", "\\'")).toBe("'\\\\'''");
   });
+  it("sqlLiteral: external gateway 沿用 MySQL 反斜線跳脫（防字串衝出）", () => {
+    // external 講 MySQL 方言（quoteIdent / USE 皆同），反斜線亦須加倍，
+    // 否則 `a\`（反斜線結尾）會變 'a\' 把結尾引號轉義掉而衝出字串。
+    expect(sqlLiteral("external", "a\\")).toBe("'a\\\\'");
+    expect(sqlLiteral("external", "a\\b")).toBe("'a\\\\b'");
+    expect(sqlLiteral("external", "O'Brien")).toBe("'O''Brien'");
+  });
 });
 
 // node 測試環境無 localStorage，提供最小記憶體實作供持久化守衛測試。

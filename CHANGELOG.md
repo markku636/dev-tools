@@ -1,3 +1,7 @@
+## 字串字面值：external gateway 沿用 MySQL 反斜線跳脫
+
+- 修正 sqlLiteral 對 external（講 MySQL 方言的閘道）未加倍反斜線的問題：external 的識別字 / USE 皆按 MySQL 處理，但字串字面值漏了反斜線跳脫，使像 a\（反斜線結尾）的值變成 a\ 後接的結尾引號被轉義而衝出字串（資料錯誤甚至注入）。改為 mysql / external 一致加倍反斜線。新增 3 條前端測試。
+
 ## MySQL：USE 前綴切分忽略引號內分號
 
 - split_leading_use 改用引號感知掃描找頂層分號，避免反引號資料庫名含 `;`（如 USE `odd;name`; …）被錯切。與唯讀守門的修正同屬一類（裸分隔掃描忽略引號）。新增 3 條後端測試。

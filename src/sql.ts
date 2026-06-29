@@ -12,12 +12,13 @@ export function qualifiedName(kind: DbKind, db: string, table: string): string {
   return kind === "sqlite" ? quoteIdent(kind, table) : `${quoteIdent(kind, db)}.${quoteIdent(kind, table)}`;
 }
 // SQL 字串字面值：NULL → NULL，其餘以單引號包裹並轉義內部單引號。
-// MySQL 預設把反斜線當字串轉義字元，故需加倍（否則含 \ 的值會被誤解，如 \b = 退格）；
+// MySQL（與 external gateway，講 MySQL 方言）預設把反斜線當字串轉義字元，故需加倍——否則像 `a\`
+// 這種以反斜線結尾的值會變成 `'a\'`，反斜線把結尾引號轉義掉而衝出字串字面值（資料錯誤甚至注入）；
 // PostgreSQL（standard_conforming_strings）與 SQLite 視 \ 為字面字元，不可加倍（否則多出反斜線）。
 export function sqlLiteral(kind: DbKind, v: string | null): string {
   if (v === null) return "NULL";
-  const escaped =
-    kind === "mysql" ? v.replace(/\\/g, "\\\\").replace(/'/g, "''") : v.replace(/'/g, "''");
+  const mysqlLike = kind === "mysql" || kind === "external";
+  const escaped = mysqlLike ? v.replace(/\\/g, "\\\\").replace(/'/g, "''") : v.replace(/'/g, "''");
   return `'${escaped}'`;
 }
 
