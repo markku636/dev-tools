@@ -659,6 +659,26 @@ pub async fn import_excel(
     crate::import::import_xlsx(&state.manager, &id, &database, &table, &bytes, &options).await
 }
 
+/// 資料傳輸：把來源表的資料複製到目標表（可跨連線 / 跨庫）。致敬 Navicat 的 Data Transfer。
+/// 以同名欄位交集傳輸，目標表需先存在。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn transfer_table(
+    state: State<'_, AppState>,
+    src_id: String,
+    src_db: String,
+    src_table: String,
+    dst_id: String,
+    dst_db: String,
+    dst_table: String,
+    options: crate::transfer::TransferOptions,
+) -> AppResult<crate::transfer::TransferResult> {
+    crate::transfer::transfer_table(
+        &state.manager, &src_id, &src_db, &src_table, &dst_id, &dst_db, &dst_table, &options,
+    )
+    .await
+}
+
 /// 匯出整個資料庫的結構 SQL（所有表的建表語句）。致敬 Navicat / DBeaver 的「轉儲結構」。
 #[tauri::command]
 pub async fn schema_dump(

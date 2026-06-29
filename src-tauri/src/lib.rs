@@ -12,6 +12,7 @@ mod import;
 mod manager;
 mod ssh;
 mod store;
+mod transfer;
 
 // CLI（唯讀查詢 + 匯出）。一直編譯；不依賴 Tauri，直接呼叫 manager / store / export / backup。
 pub mod cli;
@@ -97,6 +98,7 @@ pub fn run() {
             commands::export_rows,
             commands::import_csv,
             commands::import_excel,
+            commands::transfer_table,
             commands::schema_dump,
             commands::explain_query,
             commands::column_stats,

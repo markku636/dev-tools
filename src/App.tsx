@@ -31,6 +31,7 @@ import ImportDialog from "./ImportDialog";
 import DataDictionary from "./DataDictionary";
 import DataGenerator from "./DataGenerator";
 import QueryBuilder from "./QueryBuilder";
+import TransferDialog from "./TransferDialog";
 import { toast, uiConfirm, uiPrompt, UiHost, copyToClipboard, pickSaveFile, pickOpenFile, useEscToClose } from "./ui";
 import {
   QUERY_HISTORY_KEY, loadQueryHistory, pushQueryHistory,
@@ -665,6 +666,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
   // 由資料表右鍵觸發的對話框（匯入 / 匯出 / 資料字典 / 資料產生 / 逆向至模型）。
   const [importTbl, setImportTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
   const [exportTbl, setExportTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
+  const [transferTbl, setTransferTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
   const [dataDict, setDataDict] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
   const [dataGen, setDataGen] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
   const [erTable, setErTable] = useState<{ connId: string; db: string; table: string } | null>(null);
@@ -1218,6 +1220,8 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
     nodes.push(sep);
     if (!isView) nodes.push(it("匯入精靈…", () => setImportTbl({ connId: m.connId, db: m.db, table: m.table })));
     nodes.push(it("匯出精靈…", () => setExportTbl({ connId: m.connId, db: m.db, table: m.table })));
+    if (!isView && (m.kind === "mysql" || m.kind === "postgres" || m.kind === "sqlite"))
+      nodes.push(it("資料傳輸…", () => setTransferTbl({ connId: m.connId, db: m.db, table: m.table })));
     nodes.push({
       kind: "sub", label: "傾印 SQL 檔案", children: [
         it("結構", () => dumpTableSql(m, false)),
@@ -1847,6 +1851,11 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
         <ExportDialog connId={exportTbl.connId} database={exportTbl.db} table={exportTbl.table}
           query={{ page: 0, page_size: 1000, filters: [], sorts: [] }}
           onClose={() => setExportTbl(null)} />
+      )}
+
+      {transferTbl && (
+        <TransferDialog connId={transferTbl.connId} database={transferTbl.db} table={transferTbl.table}
+          onClose={() => setTransferTbl(null)} />
       )}
 
       {dataDict && (

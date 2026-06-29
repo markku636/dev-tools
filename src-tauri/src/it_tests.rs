@@ -1751,3 +1751,58 @@ async fn mongo_full() {
 
     d.close().await;
 }
+
+/// 資料傳輸端到端（同一 SQLite 連線、兩張表，免 Docker）：
+/// 同名欄位交集傳輸（來源多出的 extra 欄被略過）、列數統計、目標資料正確。
+#[tokio::test]
+async fn transfer_table_copies_intersection_rows() {
+    let dbfile = format!("dbkit_transfer_test_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let _ = std::fs::remove_file(dbfile);
+    let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
+    let mgr = crate::manager::ConnectionManager::new();
+    mgr.connect(c.clone()).await.unwrap();
+    let id = c.id.as_str();
+    mgr.query(id, "CREATE TABLE src (id INTEGER PRIMARY KEY, name TEXT, extra TEXT)").await.unwrap();
+    mgr.query(id, "INSERT INTO src (id, name, extra) VALUES (1,'a','x'),(2,'b',NULL),(3,'c','z')").await.unwrap();
+    mgr.query(id, "CREATE TABLE dst (id INTEGER PRIMARY KEY, name TEXT)").await.unwrap();
+
+    let opts = crate::transfer::TransferOptions { stop_on_error: false };
+    let res = crate::transfer::transfer_table(&mgr, id, "main", "src", id, "main", "dst", &opts)
+        .await
+        .unwrap();
+    assert_eq!(res.transferred, 3, "應傳輸 3 列，錯誤：{:?}", res.errors);
+    assert_eq!(res.failed, 0);
+    assert_eq!(res.columns, vec!["id".to_string(), "name".to_string()]);
+    assert_eq!(res.skipped_columns, vec!["extra".to_string()], "來源獨有欄位應被略過");
+
+    let pd = mgr
+        .table_data(id, "main", "dst", &dq(vec![], vec![Sort { column: "id".into(), dir: SortDir::Asc }]))
+        .await
+        .unwrap();
+    assert_eq!(pd.total_rows, 3);
+    assert_eq!(pd.rows[1][col_at(&pd.columns, "name")].as_deref(), Some("b"));
+
+    mgr.disconnect(id).await;
+    let _ = std::fs::remove_file(dbfile);
+}
+
+/// 資料傳輸防呆：來源與目標是同一張表 → 回 Err（避免邊讀邊寫無限增長）。
+#[tokio::test]
+async fn transfer_rejects_same_table() {
+    let dbfile = format!("dbkit_transfer_same_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let _ = std::fs::remove_file(dbfile);
+    let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
+    let mgr = crate::manager::ConnectionManager::new();
+    mgr.connect(c.clone()).await.unwrap();
+    let id = c.id.as_str();
+    mgr.query(id, "CREATE TABLE t (id INTEGER PRIMARY KEY)").await.unwrap();
+    let opts = crate::transfer::TransferOptions::default();
+    assert!(
+        crate::transfer::transfer_table(&mgr, id, "main", "t", id, "main", "t", &opts).await.is_err(),
+        "傳輸到同一張表應被拒絕"
+    );
+    mgr.disconnect(id).await;
+    let _ = std::fs::remove_file(dbfile);
+}

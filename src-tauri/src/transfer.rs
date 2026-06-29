@@ -1,0 +1,139 @@
+//! 資料傳輸（Data Transfer，致敬 Navicat）：把一張表的資料複製到另一個連線 / 資料庫 / 表。
+//!
+//! 資料層級（不建表，目標表需先存在）：以「來源 ∩ 目標」的同名欄位傳輸，逐頁讀來源、逐列寫目標，
+//! 沿用各 driver 的型別轉型，與資料庫種類無關（MySQL / PostgreSQL / SQLite，且可跨連線 / 跨庫 / 同庫跨表）。
+//! 分頁以來源主鍵排序以穩定順序（無主鍵則退回無排序，可能重複 / 漏列——與「匯出」一致）。
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+
+use crate::db::{DataQuery, RowInsert, Sort, SortDir};
+use crate::error::{AppError, AppResult};
+use crate::manager::ConnectionManager;
+
+/// 一次自來源取多少列。
+const PAGE_SIZE: u32 = 1000;
+/// 安全上限，避免極大表把流程拖死。
+const MAX_ROWS: u64 = 5_000_000;
+/// 最多保留的錯誤訊息數。
+const MAX_ERRORS: usize = 20;
+
+#[derive(Debug, Deserialize, Default)]
+pub struct TransferOptions {
+    /// 任一列失敗即中止（預設關：盡量傳輸，回報失敗列數與前幾筆錯誤）。
+    #[serde(default)]
+    pub stop_on_error: bool,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct TransferResult {
+    pub transferred: u64,
+    pub failed: u64,
+    /// 實際傳輸的欄位（來源 ∩ 目標，依來源欄序）。
+    pub columns: Vec<String>,
+    /// 來源有、目標無 → 略過的欄位（供使用者知悉）。
+    pub skipped_columns: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// 把 `src` 表的資料傳輸到 `dst` 表（兩者可屬不同連線 / 資料庫）。
+#[allow(clippy::too_many_arguments)]
+pub async fn transfer_table(
+    manager: &ConnectionManager,
+    src_id: &str,
+    src_db: &str,
+    src_table: &str,
+    dst_id: &str,
+    dst_db: &str,
+    dst_table: &str,
+    opts: &TransferOptions,
+) -> AppResult<TransferResult> {
+    // 防呆：不可把表傳輸到它自己（會邊讀邊寫無限增長）。
+    if src_id == dst_id && src_db == dst_db && src_table == dst_table {
+        return Err(AppError::Query("來源與目標是同一張表，無法傳輸".into()));
+    }
+
+    // 1. 欄位交集（同名），保留來源欄序；來源獨有者記為略過。
+    let src_cols = manager.table_columns(src_id, src_db, src_table).await?;
+    let dst_cols = manager.table_columns(dst_id, dst_db, dst_table).await?;
+    let dst_names: HashSet<&str> = dst_cols.iter().map(|c| c.name.as_str()).collect();
+    let mut columns: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for c in &src_cols {
+        if dst_names.contains(c.name.as_str()) {
+            columns.push(c.name.clone());
+        } else {
+            skipped.push(c.name.clone());
+        }
+    }
+    if columns.is_empty() {
+        return Err(AppError::Query(
+            "來源與目標沒有同名欄位可傳輸；請確認目標表結構".into(),
+        ));
+    }
+
+    // 2. 探主鍵以穩定分頁順序（無主鍵則無排序）。
+    let probe = manager
+        .table_data(
+            src_id,
+            src_db,
+            src_table,
+            &DataQuery { page: 0, page_size: 1, filters: vec![], sorts: vec![], match_any: false },
+        )
+        .await?;
+    let sorts: Vec<Sort> = probe
+        .primary_key
+        .iter()
+        .map(|c| Sort { column: c.clone(), dir: SortDir::Asc })
+        .collect();
+
+    let mut result = TransferResult {
+        columns: columns.clone(),
+        skipped_columns: skipped,
+        ..Default::default()
+    };
+    let mut page = 0u32;
+    let mut seen = 0u64;
+    loop {
+        let q = DataQuery {
+            page,
+            page_size: PAGE_SIZE,
+            filters: vec![],
+            sorts: sorts.clone(),
+            match_any: false,
+        };
+        let pd = manager.table_data(src_id, src_db, src_table, &q).await?;
+        // 交集欄位 → 來源結果欄索引（依 columns 順序取值）。
+        let idx: Vec<Option<usize>> =
+            columns.iter().map(|c| pd.columns.iter().position(|x| x == c)).collect();
+        let fetched = pd.rows.len();
+        for row in &pd.rows {
+            let values: Vec<Option<String>> = idx
+                .iter()
+                .map(|oi| oi.and_then(|i| row.get(i).cloned().flatten()))
+                .collect();
+            let ins = RowInsert { columns: columns.clone(), values };
+            match manager.insert_row(dst_id, dst_db, dst_table, &ins).await {
+                Ok(_) => result.transferred += 1,
+                Err(e) => {
+                    result.failed += 1;
+                    if result.errors.len() < MAX_ERRORS {
+                        result.errors.push(e.to_string());
+                    }
+                    if opts.stop_on_error {
+                        return Err(e);
+                    }
+                }
+            }
+            seen += 1;
+        }
+        if fetched < PAGE_SIZE as usize {
+            break;
+        }
+        if seen >= pd.total_rows || seen >= MAX_ROWS {
+            break;
+        }
+        page += 1;
+    }
+    Ok(result)
+}

@@ -150,6 +150,18 @@ export interface ImportResult {
   errors: string[];
 }
 
+// 資料傳輸（Data Transfer）：把來源表資料複製到目標表（可跨連線 / 跨庫）。
+export interface TransferOptions {
+  stop_on_error?: boolean;
+}
+export interface TransferResult {
+  transferred: number;
+  failed: number;
+  columns: string[];          // 實際傳輸的欄位（來源 ∩ 目標）
+  skipped_columns: string[];  // 來源有、目標無 → 略過
+  errors: string[];
+}
+
 export interface ColumnStats {
   total: number;
   non_null: number;
@@ -480,6 +492,12 @@ export const api = {
   importExcel: (id: string, database: string, table: string, path: string, options: ImportOptions) =>
     invoke<ImportResult>("import_excel", { id, database, table, path, options }),
   schemaDump: (id: string, database: string) => invoke<string>("schema_dump", { id, database }),
+  // 資料傳輸：把來源表資料複製到目標表（同名欄位交集；目標表需先存在）。
+  transferTable: (
+    srcId: string, srcDb: string, srcTable: string,
+    dstId: string, dstDb: string, dstTable: string,
+    options: TransferOptions,
+  ) => invoke<TransferResult>("transfer_table", { srcId, srcDb, srcTable, dstId, dstDb, dstTable, options }),
   explainQuery: (id: string, sql: string) =>
     invoke<QueryResult>("explain_query", { id, sql }),
   alterTable: (id: string, database: string, table: string, op: AlterOp) =>
