@@ -124,4 +124,16 @@ describe("planSummary", () => {
     expect(s.tables).toBe(2);
     expect(s.maxCost).toBe(40); // 不再被累積根（100）灌爆
   });
+
+  it("clamps self cost to 0 when a parent total is below its child (e.g. LIMIT over a scan)", () => {
+    // LIMIT 提早結束 → 其 Total Cost（0.5）低於子掃描（100）；自身成本夾到 0，熱點落在掃描。
+    const plan = parseExplainPlan("postgres", JSON.stringify([
+      { Plan: { "Node Type": "Limit", "Total Cost": 0.5, Plans: [
+        { "Node Type": "Seq Scan", "Relation Name": "big", "Total Cost": 100 },
+      ] } },
+    ]))!;
+    expect(plan.selfCost).toBe(0); // 不為負
+    expect(plan.children[0].selfCost).toBe(100);
+    expect(planSummary(plan).maxCost).toBe(100); // 真正熱點＝掃描
+  });
 });
