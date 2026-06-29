@@ -1,5 +1,13 @@
 # Changelog
 
+## 匯入預覽（致敬 Navicat 匯入精靈）
+
+匯入 CSV / Excel 改為「**選檔 → 預覽 → 匯入**」：選好檔即顯示**欄名與前 20 列**和約略總列數，確認無誤再匯入；調整分隔字元 / 表頭設定會即時重新預覽，搭配「重新指定欄名」對齊欄位更直覺。
+
+> 驗證：後端新增 `import_preview` command + `build_preview` 純函式（欄名 columns 覆蓋 > 表頭 > col1..N）+ 2 項 vitest（import 20 項全通過）、`cargo clippy` 零警告；前端 `tsc` + `eslint` + `vite build` 綠燈。
+
+- 預覽顯示檔案的「自然欄名」（表頭或 col1..N），方便對照後填寫覆蓋欄名。
+
 ## 匯出選取的列（資料格批次列）
 
 資料格勾選多列後，動作列新增「**匯出選取**」——把勾選的列另存 CSV / Excel / JSON / SQL / TSV / Markdown（走後端 export_rows，依副檔名選格式）。與「刪除選取」並列。

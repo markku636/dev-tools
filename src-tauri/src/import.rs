@@ -189,6 +189,35 @@ pub async fn import_xlsx(
     import_rows(manager, id, database, table, rows, opts).await
 }
 
+/// 匯入預覽（致敬 Navicat 匯入精靈的預覽 + 欄位對應）：欄名、前幾列、總列數。
+#[derive(Debug, Serialize)]
+pub struct ImportPreview {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub total_rows: u64,
+}
+
+/// 純函式：由解析後的二維字串組預覽。決定欄名（columns 覆蓋 > 表頭 > col1..colN），
+/// 回傳（欄名、前 limit 筆資料列、總資料列數）。供單元測試。
+pub fn build_preview(
+    mut rows: Vec<Vec<String>>,
+    has_header: bool,
+    columns_override: Option<Vec<String>>,
+    limit: usize,
+) -> (Vec<String>, Vec<Vec<String>>, u64) {
+    let header = if has_header && !rows.is_empty() { Some(rows.remove(0)) } else { None };
+    let columns = columns_override
+        .filter(|c| !c.is_empty())
+        .or(header)
+        .unwrap_or_else(|| {
+            let n = rows.first().map(|r| r.len()).unwrap_or(0);
+            (1..=n).map(|i| format!("col{i}")).collect()
+        });
+    let total = rows.len() as u64;
+    let preview = rows.into_iter().take(limit).collect();
+    (columns, preview, total)
+}
+
 /// 共用列寫入：由二維字串（含可選表頭）逐列 insert_row。CSV / Excel 匯入皆走此。
 async fn import_rows(
     manager: &ConnectionManager,
@@ -387,5 +416,34 @@ mod tests {
     #[test]
     fn parse_xlsx_rejects_non_xlsx_bytes() {
         assert!(super::parse_xlsx(b"not a real xlsx").is_err());
+    }
+
+    #[test]
+    fn build_preview_header_and_limit() {
+        let rows = vec![
+            vec!["id".into(), "name".into()],
+            vec!["1".into(), "a".into()],
+            vec!["2".into(), "b".into()],
+            vec!["3".into(), "c".into()],
+        ];
+        let (cols, prev, total) = super::build_preview(rows, true, None, 2);
+        assert_eq!(cols, vec!["id".to_string(), "name".to_string()]);
+        assert_eq!(prev.len(), 2, "預覽限 2 列");
+        assert_eq!(total, 3, "總資料列 3（不含表頭）");
+    }
+
+    #[test]
+    fn build_preview_override_and_no_header() {
+        let rows = vec![vec!["1".into(), "a".into()]];
+        // 無表頭 + 無覆蓋 → col1..colN。
+        let (cols, _, total) = super::build_preview(rows.clone(), false, None, 10);
+        assert_eq!(cols, vec!["col1".to_string(), "col2".to_string()]);
+        assert_eq!(total, 1);
+        // 覆蓋優先；has_header 時仍吃掉表頭列。
+        let (cols2, prev2, total2) =
+            super::build_preview(rows, true, Some(vec!["x".into(), "y".into()]), 10);
+        assert_eq!(cols2, vec!["x".to_string(), "y".to_string()]);
+        assert_eq!(total2, 0, "唯一列被當表頭吃掉");
+        assert!(prev2.is_empty());
     }
 }

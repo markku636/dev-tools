@@ -659,6 +659,34 @@ pub async fn import_excel(
     crate::import::import_xlsx(&state.manager, &id, &database, &table, &bytes, &options).await
 }
 
+/// 匯入預覽：讀檔（CSV / Excel，依副檔名）解析後回傳欄名 + 前幾列 + 總列數，供匯入前檢視 / 對應欄位。
+#[tauri::command]
+pub async fn import_preview(
+    path: String,
+    options: crate::import::ImportOptions,
+) -> AppResult<crate::import::ImportPreview> {
+    const PREVIEW_ROWS: usize = 20;
+    let is_excel = {
+        let p = path.to_ascii_lowercase();
+        p.ends_with(".xlsx") || p.ends_with(".xls")
+    };
+    let rows = if is_excel {
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| AppError::Query(format!("讀取檔案失敗：{e}")))?;
+        crate::import::parse_xlsx(&bytes)?
+    } else {
+        let content = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| AppError::Query(format!("讀取檔案失敗：{e}")))?;
+        let delim = options.delimiter.as_deref().and_then(|d| d.chars().next()).unwrap_or(',');
+        crate::import::parse_csv(&content, delim)
+    };
+    let (columns, rows, total_rows) =
+        crate::import::build_preview(rows, options.has_header, options.columns.clone(), PREVIEW_ROWS);
+    Ok(crate::import::ImportPreview { columns, rows, total_rows })
+}
+
 /// 資料傳輸：把來源表的資料複製到目標表（可跨連線 / 跨庫）。致敬 Navicat 的 Data Transfer。
 /// 以同名欄位交集傳輸，目標表需先存在。
 #[tauri::command]

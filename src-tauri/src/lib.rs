@@ -98,6 +98,7 @@ pub fn run() {
             commands::export_rows,
             commands::import_csv,
             commands::import_excel,
+            commands::import_preview,
             commands::transfer_table,
             commands::schema_dump,
             commands::explain_query,

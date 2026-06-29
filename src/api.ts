@@ -151,6 +151,13 @@ export interface ImportResult {
   errors: string[];
 }
 
+// 匯入預覽：檔案的欄名 + 前幾列 + 總列數（供匯入前檢視 / 對應欄位）。
+export interface ImportPreview {
+  columns: string[];
+  rows: string[][];
+  total_rows: number;
+}
+
 // 資料傳輸（Data Transfer）：把來源表資料複製到目標表（可跨連線 / 跨庫）。
 export interface TransferOptions {
   stop_on_error?: boolean;
@@ -491,6 +498,9 @@ export const api = {
     invoke<ExportResult>("export_rows", { columns, rows, options, outPath }),
   importCsv: (id: string, database: string, table: string, path: string, options: ImportOptions) =>
     invoke<ImportResult>("import_csv", { id, database, table, path, options }),
+  // 匯入預覽（讀檔解析欄名 + 前幾列，不寫入）。
+  importPreview: (path: string, options: ImportOptions) =>
+    invoke<ImportPreview>("import_preview", { path, options }),
   // Excel (.xlsx/.xls) 匯入：取第一張工作表，與 CSV 匯入共用後端寫入邏輯。
   importExcel: (id: string, database: string, table: string, path: string, options: ImportOptions) =>
     invoke<ImportResult>("import_excel", { id, database, table, path, options }),

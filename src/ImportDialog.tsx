@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { api, ImportResult } from "./api";
+import { useEffect, useState } from "react";
+import { api, ImportResult, ImportPreview } from "./api";
 import { pickOpenFile, toast } from "./ui";
 import { Modal, Button, Segmented, Input } from "./ui/index";
 import { Download } from "lucide-react";
 
-// CSV 匯入對話框（致敬 Navicat / DBeaver 匯入精靈）。逐列以 insert_row 寫入目標表。
+// CSV / Excel 匯入對話框（致敬 Navicat / DBeaver 匯入精靈）：選檔 → 預覽欄位 / 前幾列 → 逐列寫入。
 export default function ImportDialog({ connId, database, table, onDone, onClose }: {
   connId: string;
   database: string;
@@ -22,42 +22,48 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
   const [columns, setColumns] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  // 選定的檔案 + 預覽（檔案的自然欄名 / 前幾列）。
+  const [filePath, setFilePath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const isExcel = !!filePath && /\.(xlsx|xls)$/i.test(filePath);
 
-  const run = async () => {
-    if (busy) return; // 防重入：開檔對話框期間避免重複觸發
-    // 需要自訂欄名：無表頭，或勾選「重新指定欄名」覆蓋表頭。
+  const pickFile = async () => {
+    const path = await pickOpenFile([
+      { name: "CSV / TSV / Excel", extensions: ["csv", "tsv", "txt", "xlsx", "xls"] },
+    ]);
+    if (!path) return;
+    setFilePath(path);
+    setResult(null);
+  };
+
+  // 選檔 / 改分隔字元 / 表頭設定後重新預覽（顯示檔案自然欄名，不套用覆蓋名以便對照）。
+  useEffect(() => {
+    if (!filePath) { setPreview(null); return; }
+    let alive = true;
+    api.importPreview(filePath, { delimiter, has_header: hasHeader, columns: null })
+      .then((pv) => { if (alive) setPreview(pv); })
+      .catch((e: any) => { if (alive) { setPreview(null); toast.error(e?.message ?? "預覽失敗"); } });
+    return () => { alive = false; };
+  }, [filePath, delimiter, hasHeader]);
+
+  const doImport = async () => {
+    if (busy || !filePath) return;
     const useCols = !hasHeader || overrideNames;
     const cols = useCols ? columns.split(",").map((c) => c.trim()).filter(Boolean) : null;
     if (useCols && (!cols || cols.length === 0)) {
       toast.error(overrideNames ? "請先填要套用的欄名（逗號分隔）" : "無表頭時請先填欄名（逗號分隔）");
       return;
     }
-    const path = await pickOpenFile([
-      { name: "CSV / TSV / Excel", extensions: ["csv", "tsv", "txt", "xlsx", "xls"] },
-    ]);
-    if (!path) return;
-    // 依副檔名選匯入器：xlsx/xls 走 Excel（忽略分隔字元），其餘走 CSV。
-    const isExcel = /\.(xlsx|xls)$/i.test(path);
     setBusy(true);
     setResult(null);
     try {
-      const opts = {
-        delimiter,
-        has_header: hasHeader,
-        empty_as_null: emptyAsNull,
-        columns: cols,
-        stop_on_error: stopOnError,
-        trim,
-      };
+      const opts = { delimiter, has_header: hasHeader, empty_as_null: emptyAsNull, columns: cols, stop_on_error: stopOnError, trim };
       const res = isExcel
-        ? await api.importExcel(connId, database, table, path, opts)
-        : await api.importCsv(connId, database, table, path, opts);
+        ? await api.importExcel(connId, database, table, filePath, opts)
+        : await api.importCsv(connId, database, table, filePath, opts);
       setResult(res);
-      if (res.failed === 0) {
-        toast.success(`已匯入 ${res.imported} 列${isExcel ? "（Excel）" : ""}`);
-      } else {
-        toast.error(`匯入 ${res.imported} 列、失敗 ${res.failed} 列`);
-      }
+      if (res.failed === 0) toast.success(`已匯入 ${res.imported} 列${isExcel ? "（Excel）" : ""}`);
+      else toast.error(`匯入 ${res.imported} 列、失敗 ${res.failed} 列`);
       onDone?.(); // 重新整理資料格以顯示已匯入的列
     } catch (e: any) {
       toast.error(e?.message ?? "匯入失敗");
@@ -71,15 +77,40 @@ export default function ImportDialog({ connId, database, table, onDone, onClose 
       onClose={onClose}
       title={<>匯入 CSV / Excel · <span className="mono text-fg/60">{table}</span></>}
       icon={Download}
-      size="sm"
+      size="md"
       zClass="z-50"
-      className="!w-[460px]"
       bodyClassName="p-5 space-y-3 overflow-auto"
       footer={<>
         <Button variant="secondary" onClick={onClose}>{result ? "關閉" : "取消"}</Button>
-        <Button variant="primary" loading={busy} onClick={run} disabled={busy}>選擇檔案並匯入</Button>
+        <Button variant="secondary" onClick={pickFile}>{filePath ? "重新選檔" : "選擇檔案…"}</Button>
+        <Button variant="primary" loading={busy} onClick={doImport} disabled={busy || !filePath}>匯入</Button>
       </>}
     >
+      {filePath && (
+        <div className="text-xs text-fg/55 truncate" title={filePath}>
+          檔案：<span className="mono">{filePath.split(/[\\/]/).pop()}</span>
+          {preview && <span className="text-fg/40"> · 約 {preview.total_rows} 列資料</span>}
+        </div>
+      )}
+      {preview && preview.columns.length > 0 && (
+        <div className="rounded border border-fg/10 overflow-auto max-h-44">
+          <table className="text-[11px] border-collapse w-full">
+            <thead>
+              <tr className="text-left text-fg/40">
+                {preview.columns.map((c, i) => <th key={i} className="px-2 py-1 font-medium border-b border-fg/10 whitespace-nowrap bg-app/40">{c}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {preview.rows.map((row, ri) => (
+                <tr key={ri} className="border-b border-fg/5">
+                  {preview.columns.map((_, ci) => <td key={ci} className="px-2 py-0.5 mono text-fg/70 max-w-[160px] truncate" title={row[ci] ?? ""}>{row[ci] ?? ""}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
             <span className="text-xs text-fg/50">分隔字元</span>
             <Segmented
