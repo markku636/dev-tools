@@ -64,7 +64,7 @@ import {
   Database, ChevronRight, Table2, Eye, FunctionSquare, Cog, FileCode2,
   Search, Loader2, Pencil, Trash2, X, Play, Clock, ArrowUp, ArrowDown,
   Wand2, FlaskConical, Plus, MousePointerClick, Zap, History, FolderOpen, Save, Star,
-  GitBranch, FileText, Blocks,
+  GitBranch, FileText, Blocks, FilePlus2, MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -1559,8 +1559,9 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
                     onClick={() => {
                       setActive(c.id);
                       selectNode({ type: "table", connId: c.id, db, table: t.name, kind: c.kind, objKind: t.kind });
+                      // 單擊即開啟資料分頁（openTable 會去重：已開的表只切換、不重複開）。
+                      useStore.getState().openTable(c.id, db, t.name, "data", t.kind);
                     }}
-                    onDoubleClick={() => useStore.getState().openTable(c.id, db, t.name, "data", t.kind)}
                     onContextMenu={
                       c.kind !== "redis"
                         ? (e) => {
@@ -1571,12 +1572,12 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
                           }
                         : undefined
                     }
-                    className={`${indent} pr-3 py-1 text-fg/55 cursor-pointer truncate flex items-center gap-1.5 ${
+                    className={`${indent} pr-3 py-1.5 text-fg/55 cursor-pointer truncate flex items-center gap-1.5 ${
                       selectedNode?.type === "table" && selectedNode.connId === c.id &&
                       selectedNode.db === db && selectedNode.table === t.name
                         ? "relative bg-accent/12 before:content-[''] before:absolute before:left-0 before:inset-y-0 before:w-[2px] before:bg-accent" : "hover:bg-fg/5"
                     }`}
-                    title="單擊看詳細資料；雙擊開啟；右鍵產生查詢"
+                    title="單擊開啟資料；右鍵可產生 SELECT / 更多動作"
                   >
                     <Icon icon={t.kind === "view" ? Eye : Table2} size={14}
                       className={`shrink-0 ${t.kind === "view" ? "text-purple-300/80" : "text-sky-300/70"}`} />
@@ -1626,7 +1627,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
                     <div key={type}>
                       <div
                         onClick={() => toggleFolder(dbKey, type)}
-                        className="pl-11 pr-3 py-1 hover:bg-fg/5 cursor-pointer flex items-center gap-1.5 select-none"
+                        className="pl-11 pr-3 py-1.5 hover:bg-fg/5 cursor-pointer flex items-center gap-1.5 select-none"
                       >
                         <Icon icon={ChevronRight} size={13} className={`shrink-0 text-fg/35 transition-transform ${open ? "rotate-90" : ""}`} />
                         <Icon icon={glyphIcon} size={14} className={`shrink-0 ${color}`} />
@@ -1652,7 +1653,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
                         selectNode({ type: "database", connId: c.id, db, kind: c.kind });
                         setDbMenu({ connId: c.id, db, x: e.clientX, y: e.clientY });
                       } : undefined}
-                      className={`pl-7 pr-3 py-1 text-fg/70 cursor-pointer truncate flex items-center gap-1.5 ${
+                      className={`pl-7 pr-3 py-1.5 text-fg/70 cursor-pointer truncate flex items-center gap-1.5 ${
                         selectedNode?.type === "database" && selectedNode.connId === c.id && selectedNode.db === db
                           ? "relative bg-accent/12 before:content-[''] before:absolute before:left-0 before:inset-y-0 before:w-[2px] before:bg-accent" : "hover:bg-fg/5"
                       }`}
@@ -2111,7 +2112,7 @@ function MainArea({ onNewConnection }: { onNewConnection: () => void }) {
           hint={
             noConns
               ? "建立第一個資料庫連線，即可瀏覽資料表、執行查詢與管理結構。"
-              : "雙擊左側的連線以建立連線，再雙擊資料表即可在此開啟。"
+              : "雙擊左側的連線以建立連線，再單擊資料表即可在此開啟。"
           }
           action={
             noConns ? (
@@ -2337,6 +2338,8 @@ function QueryPane() {
   // SQL 片段庫（Navicat 風）：編輯器自動完成 + 工具列插入 / 管理。
   const [snippets, setSnippets] = useState<SqlSnippet[]>(loadSnippets);
   const [showSnippets, setShowSnippets] = useState(false);
+  // 工具列「更多」溢位選單：收納次要動作（開啟 / 另存 / 收藏 / 壓縮 / 大小寫 / 分析 / 視覺化解釋），讓主列不擁擠。
+  const [showMore, setShowMore] = useState(false);
   const editorRef = useRef<SqlEditorHandle>(null);
   // 下方分頁（致敬 Navicat 結果 / 摘要 / 解釋）：result=結果表格、summary=執行摘要、explain=視覺化執行計畫。
   const [bottomTab, setBottomTab] = useState<"result" | "summary" | "explain">("result");
@@ -2355,15 +2358,15 @@ function QueryPane() {
     axis: "y",
   });
 
-  // Esc 關閉歷史 / 收藏下拉（與選單 / 對話框一致）。
+  // Esc 關閉歷史 / 收藏 / 更多下拉（與選單 / 對話框一致）。
   useEffect(() => {
-    if (!showHistory && !showSaved && !showSnippets) return;
+    if (!showHistory && !showSaved && !showSnippets && !showMore) return;
     const h = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setShowHistory(false); setShowSaved(false); setShowSnippets(false); }
+      if (e.key === "Escape") { setShowHistory(false); setShowSaved(false); setShowSnippets(false); setShowMore(false); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [showHistory, showSaved, showSnippets]);
+  }, [showHistory, showSaved, showSnippets, showMore]);
 
   // 更新並持久化目前連線的查詢內容（使用者輸入 / 載入歷史 / Tab 縮排都走這裡）。
   // 空字串改用 removeItem（而非存 ""）：否則 loadPersistedSql 會把 "" 當「上次內容」回傳，
@@ -2424,8 +2427,16 @@ function QueryPane() {
   const pendingSql = useStore((s) => s.pendingSql);
   useEffect(() => {
     if (pendingSql != null) {
-      if (pendingSql === "" && sql.trim()) setHistory((h) => pushQueryHistory(h, sql));
-      persistSql(pendingSql);
+      // 空字串＝Ctrl+N / 工具列「新查詢」：清空編輯器、把原草稿存進歷史，並給可見回饋（避免被誤以為沒作用）。
+      if (pendingSql === "") {
+        const had = sql.trim().length > 0;
+        if (had) setHistory((h) => pushQueryHistory(h, sql));
+        persistSql("");
+        toast.success(had ? "已開新查詢（原內容已存入歷史）" : "已開新查詢");
+        setTimeout(() => editorRef.current?.focus(), 0);
+      } else {
+        persistSql(pendingSql);
+      }
       useStore.getState().clearPendingSql();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2855,7 +2866,13 @@ function QueryPane() {
               </Select>
             )}
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-1.5 items-center">
+            <button type="button" onClick={() => useStore.getState().requestQuery("")}
+              title="開新查詢：清空編輯器，原內容會存進歷史（Ctrl+N）"
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70">
+              <Icon icon={FilePlus2} size={13} />新查詢
+            </button>
+            <div className="w-px self-stretch my-1 bg-fg/10" />
             <div className="relative">
               <button type="button" onClick={() => setShowHistory((s) => !s)}
                 disabled={history.length === 0}
@@ -2885,12 +2902,6 @@ function QueryPane() {
                 </>
               )}
             </div>
-            <button type="button" onClick={openSqlFile} title="開啟 .sql 檔"
-              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70"><Icon icon={FolderOpen} size={13} />開啟</button>
-            <button type="button" onClick={saveSqlFile} title="另存為 .sql 檔"
-              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70"><Icon icon={Save} size={13} />另存</button>
-            <button type="button" onClick={saveCurrentQuery} title="收藏目前查詢"
-              className="inline-flex items-center justify-center text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70"><Icon icon={Star} size={13} /></button>
             <div className="relative">
               <button type="button" onClick={() => setShowSaved((s) => !s)} disabled={saved.length === 0}
                 title="收藏的查詢"
@@ -2971,35 +2982,65 @@ function QueryPane() {
                 <Icon icon={Wand2} size={13} />格式化
               </button>
             )}
-            {supportsExplain && (
-              <button type="button" onClick={() => persistSql(minifySql(sql))} disabled={running || !sql.trim()}
-                title="壓縮 SQL 成單行（保留字串 / 區塊註解，移除行註解）"
-                className="text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">壓縮</button>
-            )}
-            {supportsExplain && (
-              <div className="inline-flex rounded border border-fg/15 overflow-hidden">
-                <button type="button" onClick={() => persistSql(transformKeywordCase(sql, true))} disabled={running || !sql.trim()}
-                  title="關鍵字轉大寫（字串 / 註解 / 識別字不動）"
-                  className="text-xs px-2 py-1 hover:bg-fg/10 text-fg/70 disabled:opacity-40">ABC</button>
-                <button type="button" onClick={() => persistSql(transformKeywordCase(sql, false))} disabled={running || !sql.trim()}
-                  title="關鍵字轉小寫（字串 / 註解 / 識別字不動）"
-                  className="text-xs px-2 py-1 border-l border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">abc</button>
-              </div>
-            )}
-            {supportsExplain && (
-              <button type="button" onClick={() => execute("analyze")} disabled={running}
-                title="EXPLAIN：以表格查看查詢執行計畫"
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
-                <Icon icon={FlaskConical} size={13} />分析
+            <div className="relative">
+              <button type="button" onClick={() => setShowMore((s) => !s)}
+                title="更多工具：檔案 / 收藏 / SQL 轉換 / 執行計畫"
+                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70">
+                <Icon icon={MoreHorizontal} size={13} />更多
               </button>
-            )}
-            {supportsVisualExplain && (
-              <button type="button" onClick={runVisualExplain} disabled={running}
-                title="視覺化解釋：以執行計畫樹呈現（EXPLAIN FORMAT=JSON），標出成本熱點"
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-fg/15 hover:bg-fg/10 text-fg/70 disabled:opacity-40">
-                <Icon icon={GitBranch} size={13} />視覺化解釋
-              </button>
-            )}
+              {showMore && (
+                <>
+                  <div className="fixed inset-0 z-[89]" onClick={() => setShowMore(false)} />
+                  <div className="absolute right-0 mt-1 z-[90] w-56 bg-elevated border border-fg/10 rounded-lg shadow-2xl py-1">
+                    <div className="px-3 py-1 text-[11px] text-fg/40">檔案 / 收藏</div>
+                    <button type="button" onClick={() => { setShowMore(false); openSqlFile(); }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10">
+                      <Icon icon={FolderOpen} size={13} className="text-fg/45" />開啟 .sql 檔…
+                    </button>
+                    <button type="button" onClick={() => { setShowMore(false); saveSqlFile(); }} disabled={!sql.trim()}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10 disabled:opacity-40">
+                      <Icon icon={Save} size={13} className="text-fg/45" />另存為 .sql 檔…
+                    </button>
+                    <button type="button" onClick={() => { setShowMore(false); saveCurrentQuery(); }} disabled={!sql.trim()}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10 disabled:opacity-40">
+                      <Icon icon={Star} size={13} className="text-fg/45" />收藏目前查詢…
+                    </button>
+                    {supportsExplain && (
+                      <>
+                        <div className="px-3 py-1 mt-1 text-[11px] text-fg/40 border-t border-fg/10">SQL 轉換</div>
+                        <button type="button" onClick={() => { setShowMore(false); persistSql(minifySql(sql)); }} disabled={!sql.trim()}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10 disabled:opacity-40">
+                          <Icon icon={FileText} size={13} className="text-fg/45" />壓縮成單行
+                        </button>
+                        <button type="button" onClick={() => { setShowMore(false); persistSql(transformKeywordCase(sql, true)); }} disabled={!sql.trim()}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10 disabled:opacity-40">
+                          <span className="w-[13px] text-center text-fg/45 font-bold text-[10px]">AB</span>關鍵字轉大寫
+                        </button>
+                        <button type="button" onClick={() => { setShowMore(false); persistSql(transformKeywordCase(sql, false)); }} disabled={!sql.trim()}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10 disabled:opacity-40">
+                          <span className="w-[13px] text-center text-fg/45 font-bold text-[10px]">ab</span>關鍵字轉小寫
+                        </button>
+                      </>
+                    )}
+                    {(supportsExplain || supportsVisualExplain) && (
+                      <div className="px-3 py-1 mt-1 text-[11px] text-fg/40 border-t border-fg/10">執行計畫</div>
+                    )}
+                    {supportsExplain && (
+                      <button type="button" onClick={() => { setShowMore(false); execute("analyze"); }} disabled={running}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10 disabled:opacity-40">
+                        <Icon icon={FlaskConical} size={13} className="text-fg/45" />分析（EXPLAIN 表格）
+                      </button>
+                    )}
+                    {supportsVisualExplain && (
+                      <button type="button" onClick={() => { setShowMore(false); runVisualExplain(); }} disabled={running}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-left text-fg/75 hover:bg-fg/10 disabled:opacity-40">
+                        <Icon icon={GitBranch} size={13} className="text-fg/45" />視覺化解釋
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
             {paramCount > 0 && (
               <span className="text-[11px] text-sky-300/80 px-1" title="偵測到具名參數 :name；執行時會逐一提示輸入並安全代入">
                 ⟨{paramCount} 參數⟩

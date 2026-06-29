@@ -13,7 +13,7 @@ import { lintSqlStructure } from "./sql";
 // SQL 片段（供編輯器自動完成展開：輸入名稱 → 補入 body）。
 export interface EditorSnippet { name: string; body: string; desc?: string }
 // 外部可命令式呼叫的方法（供「片段」工具列在游標處插入）。
-export interface SqlEditorHandle { insertText: (text: string) => void }
+export interface SqlEditorHandle { insertText: (text: string) => void; focus: () => void }
 
 // 送出（執行）時的上下文：選取文字、游標位移、是否整段執行（F6）。
 export interface SqlSubmit {
@@ -108,6 +108,7 @@ const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function SqlEditor
       });
       view.focus();
     },
+    focus: () => cmRef.current?.view?.focus(),
   }), []);
   // onSubmit 以 ref 持有，避免每次 render 重建 extensions（CodeMirror 會重新配置）。
   const submitRef = useRef(onSubmit);
