@@ -73,6 +73,8 @@ import {
   lintSqlStructure,
   buildSelectQuery,
   buildCountQuery,
+  extractNamedParams,
+  substituteNamedParams,
   isWriteStatement,
   buildInClause,
   transformKeywordCase,
@@ -1027,6 +1029,23 @@ describe("transformKeywordCase（關鍵字大小寫）", () => {
     // date / text 不在關鍵字集合 → 保持原樣，避免誤改欄名。
     expect(transformKeywordCase("select date, text from t", true))
       .toBe("SELECT date, text FROM t");
+  });
+});
+
+describe("具名參數（extractNamedParams / substituteNamedParams）", () => {
+  it("萃取：依序去重，字串 / 註解內不算，PG ::type 不誤判", () => {
+    expect(extractNamedParams("SELECT * FROM t WHERE id = :id AND name = :name")).toEqual(["id", "name"]);
+    expect(extractNamedParams("SELECT :a, :a, :b")).toEqual(["a", "b"]);
+    expect(extractNamedParams("SELECT id::int FROM t")).toEqual([]); // ::type 非參數
+    expect(extractNamedParams("SELECT ':notparam' -- :alsonot\nFROM t WHERE x=:real")).toEqual(["real"]);
+  });
+  it("代入：數字原樣、字串字面值（方言跳脫）、未提供保持原樣、::type 不動", () => {
+    expect(substituteNamedParams("mysql", "WHERE id = :id", { id: "5" })).toBe("WHERE id = 5");
+    expect(substituteNamedParams("mysql", "WHERE name = :n", { n: "O'Brien" })).toBe("WHERE name = 'O''Brien'");
+    expect(substituteNamedParams("mysql", "WHERE a=:a AND b=:b", { a: "1" })).toBe("WHERE a=1 AND b=:b");
+    expect(substituteNamedParams("postgres", "SELECT id::int WHERE x=:x", { x: "2" })).toBe("SELECT id::int WHERE x=2");
+    // 字串內的 :id 不被代入。
+    expect(substituteNamedParams("mysql", "SELECT ':id' WHERE id=:id", { id: "7" })).toBe("SELECT ':id' WHERE id=7");
   });
 });
 

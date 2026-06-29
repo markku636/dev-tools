@@ -738,6 +738,40 @@ export function buildInClause(kind: DbKind, column: string, values: (string | nu
   return inPart || `${col} IN (NULL)`; // 無值（理論上不會發生）→ 給合法但無相符的條件
 }
 
+// 具名參數（`:name`）萃取 / 代入（致敬 Navicat 的參數化查詢）。在「程式碼」段才認，
+// 字串 / 註解內的 `:name` 不算；PostgreSQL 型別轉換 `::type` 不誤判為參數。
+const PARAM_RE = /:{1,2}([a-zA-Z_]\w*)/g;
+
+// 取出 SQL 內所有具名參數（依出現順序、去重）。
+export function extractNamedParams(sql: string): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const seg of sqlCodeSegments(sql)) {
+    if (!seg.code) continue;
+    PARAM_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = PARAM_RE.exec(seg.v))) {
+      if (m[0].startsWith("::")) continue; // PG 型別轉換，非參數
+      if (!seen.has(m[1])) { seen.add(m[1]); names.push(m[1]); }
+    }
+  }
+  return names;
+}
+
+// 將 SQL 內的具名參數代入值（數字原樣、其餘字串字面值；方言感知）。未提供值的參數保持原樣。
+export function substituteNamedParams(kind: DbKind, sql: string, values: Record<string, string>): string {
+  return sqlCodeSegments(sql)
+    .map((seg) => {
+      if (!seg.code) return seg.v;
+      return seg.v.replace(PARAM_RE, (full, name: string) => {
+        if (full.startsWith("::") || !(name in values)) return full;
+        const v = values[name];
+        return /^-?\d+(\.\d+)?$/.test(v.trim()) ? v.trim() : sqlLiteral(kind, v);
+      });
+    })
+    .join("");
+}
+
 // 是否為「寫入 / DDL」語句（供唯讀連線攔截）。略過開頭的空白 / 行 / 區塊註解後，
 // 檢查第一個關鍵字是否為會改動資料 / 結構者。SELECT / SHOW / EXPLAIN / WITH(…SELECT) 等視為唯讀。
 export function isWriteStatement(sql: string): boolean {

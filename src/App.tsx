@@ -49,6 +49,7 @@ import {
   buildTableMaintenance, buildInsertAllRows, tableSizesSql,
   buildDeleteAllRows, buildInsertValues, buildGrantTemplate,
   formatSql, transformKeywordCase, buildUseDatabase, hasExecutableSql,
+  extractNamedParams, substituteNamedParams,
 } from "./sql";
 import type { SavedQuery } from "./sql";
 import Select from "./ui/Select";
@@ -2430,8 +2431,21 @@ function QueryPane() {
 
   const execute = async (mode: "run" | "analyze", overrideQuery?: string) => {
     if (!activeId || running) return;
-    const q = overrideQuery && overrideQuery.trim() ? overrideQuery : queryToRun();
+    let q = overrideQuery && overrideQuery.trim() ? overrideQuery : queryToRun();
     if (!q.trim()) return;
+    // 參數化查詢（致敬 Navicat）：偵測 `:name` 參數，逐一提示輸入後代入（SQL-like 連線）。
+    if (kind && (EXPLAIN_KINDS.includes(kind) || kind === "external")) {
+      const params = extractNamedParams(q);
+      if (params.length) {
+        const values: Record<string, string> = {};
+        for (const p of params) {
+          const v = await uiPrompt(`參數 :${p} 的值`, { title: "參數化查詢", placeholder: `:${p}`, confirmText: "確定" });
+          if (v === null) return; // 任一取消 → 中止整次執行
+          values[p] = v;
+        }
+        q = substituteNamedParams(kind, q, values);
+      }
+    }
     setErr(null);
     setErrSql(null);
     setErrStmt(null);
