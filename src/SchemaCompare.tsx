@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, GitCompareArrows } from "lucide-react";
 import { api, ColumnInfo, DbKind } from "./api";
+import { useStore } from "./store";
 import { toast, copyToClipboard } from "./ui";
 import { Modal, IconButton } from "./ui/index";
 import { diffNameLists, diffColumns, buildAddColumnsDdl, buildModifyColumnsDdl, NameDiff, ColumnDiff, SchemaColumn } from "./sql";
 
-// 結構比對（對標 Navicat Premium 的結構同步）：比對同一連線下兩個資料庫的資料表與欄位差異。
+// 結構比對（對標 Navicat Premium 的結構同步）：比對兩個資料庫的資料表與欄位差異——
+// 同一連線跨庫，或**跨連線**（如正式 vs 測試，限相同資料庫種類以便產生相容 DDL）。
 // 全部以既有唯讀 API（listDatabases / listTables / tableColumns）達成，獨立對話框、不動既有畫面。
 export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
   connId: string;
@@ -13,6 +15,14 @@ export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
   sourceDb: string;
   onClose: () => void;
 }) {
+  const connections = useStore((s) => s.connections);
+  const connectedIds = useStore((s) => s.connectedIds);
+  // 目標連線：同種類（DDL 相容）且已連線者，含來源連線本身。
+  const targetConns = useMemo(
+    () => connections.filter((c) => c.kind === kind && (connectedIds.has(c.id) || c.id === connId)),
+    [connections, connectedIds, connId, kind],
+  );
+  const [targetConnId, setTargetConnId] = useState(connId);
   const [dbs, setDbs] = useState<string[]>([]);
   const [target, setTarget] = useState("");
   const [diff, setDiff] = useState<NameDiff | null>(null);
@@ -21,13 +31,15 @@ export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
   const [syncSql, setSyncSql] = useState<string | null>(null);
   const [genBusy, setGenBusy] = useState(false);
 
+  // 載入目標連線的資料庫清單（同連線時排除來源庫，避免自比）。切換連線會重置比對。
   useEffect(() => {
-    api.listDatabases(connId).then((list) => {
-      const others = list.filter((d) => d !== sourceDb);
+    setDiff(null); setColDiffs({}); setSyncSql(null);
+    api.listDatabases(targetConnId).then((list) => {
+      const others = targetConnId === connId ? list.filter((d) => d !== sourceDb) : list;
       setDbs(others);
-      if (others.length) setTarget(others[0]);
+      setTarget(others[0] ?? "");
     }).catch((e: any) => toast.error(e?.message ?? "讀取資料庫清單失敗"));
-  }, [connId, sourceDb]);
+  }, [targetConnId, connId, sourceDb]);
 
   // 產生「缺少資料表」的 CREATE 語句（取來源端 DDL，於目標執行即補齊）。供使用者檢視 / 複製後執行。
   const genSyncSql = async (tables: string[]) => {
@@ -49,7 +61,7 @@ export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
     if (!target) return;
     setBusy(true); setDiff(null); setColDiffs({}); setSyncSql(null);
     try {
-      const [s, t] = await Promise.all([api.listTables(connId, sourceDb), api.listTables(connId, target)]);
+      const [s, t] = await Promise.all([api.listTables(connId, sourceDb), api.listTables(targetConnId, target)]);
       setDiff(diffNameLists(s.map((x) => x.name), t.map((x) => x.name)));
     } catch (e: any) {
       toast.error(e?.message ?? "比對失敗");
@@ -64,7 +76,7 @@ export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
     try {
       const [sc, tc] = await Promise.all([
         api.tableColumns(connId, sourceDb, table),
-        api.tableColumns(connId, target, table),
+        api.tableColumns(targetConnId, target, table),
       ]);
       const toSc = (c: ColumnInfo): SchemaColumn => ({ name: c.name, data_type: c.data_type, nullable: c.nullable });
       const srcCols = sc.map(toSc);
@@ -95,8 +107,14 @@ export default function SchemaCompare({ connId, kind, sourceDb, onClose }: {
       className="!w-[880px] max-w-[96vw] h-[82vh]"
       bodyClassName="flex-1 overflow-auto p-4 space-y-4 text-sm">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="mono text-xs px-2 py-0.5 rounded bg-blue-500/15 text-blue-300">來源：{sourceDb}</span>
+        <span className="mono text-xs px-2 py-0.5 rounded bg-blue-500/15 text-blue-300">來源：{connections.find((c) => c.id === connId)?.name} · {sourceDb}</span>
         <span className="text-fg/40 text-xs">→ 目標</span>
+        {targetConns.length > 1 && (
+          <select value={targetConnId} onChange={(e) => setTargetConnId(e.target.value)} title="目標連線（同種類）"
+            className="bg-well border border-fg/15 rounded px-2 py-1 text-xs focus:border-accent">
+            {targetConns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        )}
         <select value={target} onChange={(e) => setTarget(e.target.value)} title="目標資料庫"
           className="bg-well border border-fg/15 rounded px-2 py-1 text-xs focus:border-accent">
           {dbs.length === 0 && <option value="">（無其他資料庫）</option>}
