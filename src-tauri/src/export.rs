@@ -233,7 +233,88 @@ fn render(
             }
             Ok(out.into_bytes())
         }
+        "xlsx" => render_xlsx(columns, rows, opts),
         other => Err(AppError::Query(format!("不支援的匯出格式：{other}"))),
+    }
+}
+
+/// Excel (.xlsx) 匯出（致敬 Navicat「匯出至 Excel」）：一張工作表、首列為（可選）粗體標題。
+/// 值預設寫成文字以保真（避免 007 / 大整數 / 1.50 等失真）；僅當字串為「乾淨數字」
+/// 且以 f64 往返一致時才寫成數字（Excel 可加總、右對齊）。NULL 留空白格。
+fn render_xlsx(
+    columns: &[String],
+    rows: &[Vec<Option<String>>],
+    opts: &ExportOptions,
+) -> AppResult<Vec<u8>> {
+    use rust_xlsxwriter::{Format, Workbook};
+
+    // xlsx 上限：1,048,576 列 × 16,384 欄。超出直接回報，不靜默截斷。
+    if columns.len() > 16_384 {
+        return Err(AppError::Query(format!(
+            "欄數 {} 超過 Excel 上限（16384）",
+            columns.len()
+        )));
+    }
+    let header_rows = if opts.include_header { 1 } else { 0 };
+    if rows.len() + header_rows > 1_048_576 {
+        return Err(AppError::Query(format!(
+            "列數 {} 超過 Excel 上限（1048576）",
+            rows.len()
+        )));
+    }
+
+    let mut wb = Workbook::new();
+    let ws = wb.add_worksheet();
+    let mut r: u32 = 0;
+    if opts.include_header {
+        let bold = Format::new().set_bold();
+        for (c, name) in columns.iter().enumerate() {
+            ws.write_string_with_format(0, c as u16, name, &bold)
+                .map_err(|e| AppError::Query(format!("寫入 Excel 失敗：{e}")))?;
+        }
+        r = 1;
+    }
+    for row in rows {
+        for (c, v) in row.iter().enumerate() {
+            if let Some(s) = v {
+                let col = c as u16;
+                match as_excel_number(s) {
+                    Some(n) => ws.write_number(r, col, n),
+                    None => ws.write_string(r, col, s),
+                }
+                .map_err(|e| AppError::Query(format!("寫入 Excel 失敗：{e}")))?;
+            }
+            // None（NULL）→ 留空白格。
+        }
+        r += 1;
+    }
+    wb.save_to_buffer()
+        .map_err(|e| AppError::Query(format!("產生 Excel 失敗：{e}")))
+}
+
+/// 僅在「乾淨數字且 f64 往返一致」時回傳數值，否則 None（保留為文字）。
+/// 排除前導零（007）、尾隨零小數（1.50）、超精度大整數等會失真的字串。
+fn as_excel_number(s: &str) -> Option<f64> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    // 嚴格十進位整數 / 小數（不含指數 / 正負號以外符號）。
+    let mut seen_dot = false;
+    for (idx, ch) in t.char_indices() {
+        match ch {
+            '-' if idx == 0 => {}
+            '0'..='9' => {}
+            '.' if !seen_dot && idx > 0 => seen_dot = true,
+            _ => return None,
+        }
+    }
+    let n: f64 = t.parse().ok()?;
+    // 以 Rust 最短往返表示比對：相等才視為無失真（007→"7"、1.50→"1.5"、大整數會不等）。
+    if n.is_finite() && n.to_string() == t {
+        Some(n)
+    } else {
+        None
     }
 }
 
@@ -404,5 +485,33 @@ mod tests {
         let columns = cols(&["a"]);
         let rows = vec![row(&[Some("x")])];
         assert!(render(&columns, &rows, &opts("xml"), "t").is_err());
+    }
+
+    #[test]
+    fn render_xlsx_produces_valid_zip_container() {
+        // xlsx 即一個 ZIP 容器：須以本地檔頭魔數 "PK\x03\x04" 開頭且非空。
+        let columns = cols(&["id", "name"]);
+        let rows = vec![row(&[Some("1"), Some("a")]), row(&[Some("2"), None])];
+        let bytes = render(&columns, &rows, &opts("xlsx"), "t").unwrap();
+        assert!(bytes.len() > 100, "xlsx 不應為空");
+        assert_eq!(&bytes[..4], b"PK\x03\x04", "xlsx 應為 ZIP（PK 魔數）開頭");
+    }
+
+    #[test]
+    fn xlsx_number_detection_preserves_fidelity() {
+        // 乾淨數字 → 視為數值。
+        assert_eq!(as_excel_number("0"), Some(0.0));
+        assert_eq!(as_excel_number("42"), Some(42.0));
+        assert_eq!(as_excel_number("-3"), Some(-3.0));
+        assert_eq!(as_excel_number("1.5"), Some(1.5));
+        // 會失真者 → 保留為文字（None）。
+        assert_eq!(as_excel_number("007"), None, "前導零不可當數字");
+        assert_eq!(as_excel_number("1.50"), None, "尾隨零小數會失真");
+        assert_eq!(as_excel_number("123456789012345678"), None, "超精度大整數會失真");
+        assert_eq!(as_excel_number("1e3"), None, "指數記法不接受");
+        assert_eq!(as_excel_number("abc"), None);
+        assert_eq!(as_excel_number(""), None);
+        assert_eq!(as_excel_number("1.2.3"), None);
+        assert_eq!(as_excel_number("."), None);
     }
 }

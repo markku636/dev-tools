@@ -117,7 +117,7 @@ export interface DataQuery {
   match_any?: boolean; // false = AND（預設）、true = OR
 }
 
-export type ExportFormat = "csv" | "tsv" | "json" | "sql" | "markdown";
+export type ExportFormat = "csv" | "tsv" | "json" | "sql" | "markdown" | "xlsx";
 
 export interface ExportOptions {
   format: ExportFormat;

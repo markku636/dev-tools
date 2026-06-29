@@ -57,6 +57,8 @@ dirs = "6"
 aes-gcm = "0.10"
 argon2 = "0.5"
 rand = "0.8"
+# Excel (.xlsx) 匯出：純 Rust（內含 zip + miniz_oxide，無 C / 系統相依），跨平台可打包。
+rust_xlsxwriter = "0.79"
 
 # OS keychain：依平台選用原生後端，避免在 Windows 上編譯 secret-service。
 [target.'cfg(windows)'.dependencies]

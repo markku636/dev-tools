@@ -7,6 +7,7 @@ import { Modal, Button, Input } from "./ui/index";
 const FORMATS: { v: ExportFormat; label: string; ext: string }[] = [
   { v: "csv", label: "CSV", ext: "csv" },
   { v: "tsv", label: "TSV", ext: "tsv" },
+  { v: "xlsx", label: "Excel (.xlsx)", ext: "xlsx" },
   { v: "json", label: "JSON", ext: "json" },
   { v: "sql", label: "SQL (INSERT)", ext: "sql" },
   { v: "markdown", label: "Markdown", ext: "md" },
@@ -29,6 +30,9 @@ export default function ExportDialog({ connId, database, table, query, onClose }
 
   const meta = FORMATS.find((f) => f.v === format)!;
   const isCsv = format === "csv" || format === "tsv";
+  const isXlsx = format === "xlsx";
+  // CSV/TSV 與 Excel 都用得到欄位標題；BOM / NULL 顯示僅文字格式適用。
+  const showHeader = isCsv || isXlsx;
 
   const run = async () => {
     if (busy) return;
@@ -85,12 +89,15 @@ export default function ExportDialog({ connId, database, table, query, onClose }
             匯出全部符合的列（取消＝只匯出目前頁；含目前的篩選與排序）
           </label>
 
+          {showHeader && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input type="checkbox" checked={includeHeader} onChange={(e) => setIncludeHeader(e.target.checked)} />
+              含欄位標題{isXlsx ? "（首列粗體）" : ""}
+            </label>
+          )}
+
           {isCsv && (
             <>
-              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                <input type="checkbox" checked={includeHeader} onChange={(e) => setIncludeHeader(e.target.checked)} />
-                含欄位標題
-              </label>
               <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                 <input type="checkbox" checked={bom} onChange={(e) => setBom(e.target.checked)} />
                 加 UTF-8 BOM（方便 Excel 開啟）

@@ -1,5 +1,17 @@
 # Changelog
 
+## Excel（.xlsx）匯出（致敬 Navicat「匯出至 Excel」）
+
+匯出資料對話框新增 **Excel (.xlsx)** 格式，直接產生原生 Excel 活頁簿，不再只能用 CSV 繞道。
+
+> 驗證：後端新增 `rust_xlsxwriter`（純 Rust、內含 zip + miniz_oxide，無 C / 系統相依，跨平台可打包）；`cargo test export::` 13 項全通過（含 xlsx 容器魔數與數字保真 2 項新測試）、新程式碼 `cargo clippy` 零警告；前端 `tsc` + `eslint` + `vite build` 綠燈、vitest 130 項全通過。
+
+- **一張工作表 + 可選粗體標題列**：勾選「含欄位標題」時，首列為粗體欄名。
+- **數字保真**：值預設寫成文字以免失真；僅當字串為「乾淨數字」且以 f64 最短往返表示一致時才寫成數值（Excel 可加總、右對齊）。前導零（`007`）、尾隨零小數（`1.50`）、超精度大整數、指數記法一律保留為文字。`NULL` 留空白格。
+- **尊重既有篩選 / 排序 / 全部列或目前頁**（沿用 `export_table` 管線）。
+- **上限保護**：欄數 > 16384 或列數 > 1048576 直接回報錯誤，不靜默截斷。
+- 後端共用 `render()`，CLI（`dbk`）匯出亦自動支援 xlsx。
+
 ## 視覺化查詢建構器（Visual Query Builder，致敬 Navicat SQL Builder）
 
 對標 Navicat 旗艦的 SQL Builder：不寫 SQL，靠勾選與下拉即可組出 SELECT 查詢，再一鍵帶入查詢編輯器執行 / 微調。僅關聯式（MySQL / PostgreSQL / SQLite）。
