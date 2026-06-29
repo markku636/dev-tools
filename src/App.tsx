@@ -672,6 +672,7 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
   const [importTbl, setImportTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
   const [exportTbl, setExportTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
   const [transferTbl, setTransferTbl] = useState<{ connId: string; db: string; table: string } | null>(null);
+  const [builderTbl, setBuilderTbl] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
   const [dataDict, setDataDict] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
   const [dataGen, setDataGen] = useState<{ connId: string; db: string; table: string; kind: DbKind } | null>(null);
   const [erTable, setErTable] = useState<{ connId: string; db: string; table: string } | null>(null);
@@ -1225,6 +1226,8 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
     nodes.push(sep);
     if (!isView) nodes.push(it("匯入精靈…", () => setImportTbl({ connId: m.connId, db: m.db, table: m.table })));
     nodes.push(it("匯出精靈…", () => setExportTbl({ connId: m.connId, db: m.db, table: m.table })));
+    if (m.kind === "mysql" || m.kind === "postgres" || m.kind === "sqlite")
+      nodes.push(it("查詢建構器…", () => setBuilderTbl({ connId: m.connId, db: m.db, table: m.table, kind: m.kind })));
     if (!isView && (m.kind === "mysql" || m.kind === "postgres" || m.kind === "sqlite"))
       nodes.push(it("資料傳輸…", () => setTransferTbl({ connId: m.connId, db: m.db, table: m.table })));
     nodes.push({
@@ -1879,6 +1882,12 @@ function Sidebar({ onEdit, width }: { onEdit: (c: ConnectionConfig) => void; wid
       {transferTbl && (
         <TransferDialog connId={transferTbl.connId} database={transferTbl.db} table={transferTbl.table}
           onClose={() => setTransferTbl(null)} />
+      )}
+
+      {builderTbl && (
+        <QueryBuilder connId={builderTbl.connId} kind={builderTbl.kind} initialDb={builderTbl.db} initialTable={builderTbl.table}
+          onClose={() => setBuilderTbl(null)}
+          onUse={(sql) => { sendQuery(builderTbl.connId, sql); setBuilderTbl(null); }} />
       )}
 
       {dataDict && (

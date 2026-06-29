@@ -1,5 +1,13 @@
 # Changelog
 
+## 從資料表右鍵直接開「查詢建構器」
+
+讓旗艦的視覺化查詢建構器更好發現：在側欄**資料表右鍵新增「查詢建構器…」**（MySQL / PostgreSQL / SQLite，含視圖），開啟時自動帶入該表，按「帶入查詢編輯器」即把產生的 SQL 送進查詢分頁執行。
+
+> 驗證：QueryBuilder 加 `initialTable` prop（模型載入後自動加入該表，僅一次）；沿用 `sendQuery` 把產生的 SQL 推進查詢編輯器；前端 `tsc` + `eslint` + `vite build` 綠燈、vitest 138 項全通過。
+
+- 先前查詢建構器只能從查詢工具列開啟；現在資料瀏覽到一半也能就地以該表起手。
+
 ## 視覺化查詢建構器：結果預覽 + 欄位全選 / 清空
 
 讓查詢建構器更接近 Navicat SQL Builder 的「邊建邊看」手感。

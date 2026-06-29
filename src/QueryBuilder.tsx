@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Blocks, Table2, Plus, Trash2, X, ArrowUpDown, Filter, Wand2, Copy, Check,
   Link2, Sigma, Play, Database,
@@ -39,11 +39,12 @@ interface SelHaving extends QbHaving { id: string }
 interface SelOrder extends QbOrder { id: string }
 
 export default function QueryBuilder({
-  connId, kind, initialDb, onClose, onUse,
+  connId, kind, initialDb, initialTable, onClose, onUse,
 }: {
   connId: string;
   kind: DbKind;
   initialDb: string;
+  initialTable?: string; // 開啟時預先加入的資料表（從側欄資料表右鍵啟動）
   onClose: () => void;
   onUse: (sql: string) => void;
 }) {
@@ -92,6 +93,17 @@ export default function QueryBuilder({
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [connId, db]);
+
+  // 由側欄資料表啟動時：模型載入後自動加入該表（僅一次）。
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!model || seeded.current || !initialTable) return;
+    if (model.tables.some((t) => t.name === initialTable)) {
+      seeded.current = true;
+      addTable(initialTable);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, initialTable]);
 
   const tableByName = (n: string): ErTable | undefined => model?.tables.find((t) => t.name === n);
   const colsOf = (n: string): string[] => tableByName(n)?.columns.map((c) => c.name) ?? [];
