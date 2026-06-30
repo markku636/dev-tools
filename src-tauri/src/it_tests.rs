@@ -1917,3 +1917,37 @@ async fn import_csv_trim_cells() {
     mgr.disconnect(id).await;
     let _ = std::fs::remove_file(dbfile);
 }
+
+#[tokio::test]
+async fn import_csv_skips_whitespace_only_row_when_trimming() {
+    let dbfile = format!("dbkit_import_blank_{}.db", std::process::id());
+    let dbfile = dbfile.as_str();
+    let _ = std::fs::remove_file(dbfile);
+    let c = cfg(DbKind::Sqlite, "", 0, "", "", Some(dbfile));
+    let mgr = crate::manager::ConnectionManager::new();
+    mgr.connect(c.clone()).await.unwrap();
+    let id = c.id.as_str();
+    mgr.query(id, "CREATE TABLE imp (id INTEGER PRIMARY KEY, name TEXT)").await.unwrap();
+
+    // 中間整列純空白：trim 開啟時應被略過，而非插入一列 (auto id, NULL)。
+    let csv = "id,name\n1,alice\n  ,  \n2,bob";
+    let opts = crate::import::ImportOptions {
+        delimiter: None,
+        has_header: true,
+        empty_as_null: true,
+        columns: None,
+        stop_on_error: false,
+        trim: true,
+    };
+    let res = crate::import::import_csv(&mgr, id, "main", "imp", csv, &opts).await.unwrap();
+    assert_eq!(res.imported, 2, "純空白列應略過，只匯入 2 列；錯誤：{:?}", res.errors);
+    assert_eq!(res.failed, 0);
+    let pd = mgr
+        .table_data(id, "main", "imp", &dq(vec![], vec![Sort { column: "id".into(), dir: SortDir::Asc }]))
+        .await
+        .unwrap();
+    assert_eq!(pd.rows.len(), 2, "資料表只應有 2 列（無雜訊 NULL 列）");
+
+    mgr.disconnect(id).await;
+    let _ = std::fs::remove_file(dbfile);
+}

@@ -254,8 +254,13 @@ async fn import_rows(
     for (i, row) in rows.iter().enumerate() {
         // 行號（1-based，含表頭偏移）供錯誤訊息定位。
         let line_no = if opts.has_header { i + 2 } else { i + 1 };
-        if row.iter().all(|c| c.is_empty()) {
-            continue; // 略過全空白列
+        // 略過全空白列；trim 開啟時純空白（trim 後為空）亦視為空白列，
+        // 否則會插入一整列 NULL（auto-PK 表更會無聲產生雜訊列）。
+        let blank = row
+            .iter()
+            .all(|c| if opts.trim { c.trim().is_empty() } else { c.is_empty() });
+        if blank {
+            continue;
         }
         if row.len() != columns.len() {
             let msg = format!("第 {line_no} 列欄數 {} 與表頭 {} 不符", row.len(), columns.len());

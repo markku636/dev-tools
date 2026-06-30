@@ -1,3 +1,7 @@
+## 匯入：trim 開啟時略過純空白列
+
+- CSV/Excel 匯入啟用「去除前後空白」時，整列皆為空白的資料列現在會被略過，而非插入一整列 NULL（auto-PK 表更會無聲產生雜訊列）。空白列偵測改為 trim 感知。新增 1 條後端整合測試。
+
 ## 資料列右鍵：複製為 SELECT（定位此列）
 
 - 仿 Navicat「Copy as SELECT」：在資料格右鍵新增「複製為 SELECT（定位此列）」，以主鍵組出 SELECT * FROM 表 WHERE pk=… 方便精準重查 / 分享單列。屬唯讀動作，readonly 連線也提供（不像 UPDATE/DELETE 需可寫）。+1 前端測試。
