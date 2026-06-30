@@ -391,6 +391,19 @@ export function buildRowUpdate(
   return `UPDATE ${qi(table)} SET ${sets} WHERE ${where};`;
 }
 
+// 由某列主鍵產生「定位此列」的 SELECT（致敬 Navicat「Copy as SELECT」）：供精準重查 / 分享單列，
+// 唯讀連線亦可用（不寫入）。WHERE 用主鍵定位（呼叫端確保有主鍵）。
+export function buildRowSelect(
+  kind: DbKind,
+  table: string,
+  pkCols: string[],
+  pkVals: (string | null)[],
+): string {
+  const qi = (id: string) => quoteIdent(kind, id);
+  const where = pkCols.map((c, i) => `${qi(c)} = ${sqlLiteral(kind, pkVals[i])}`).join(" AND ");
+  return `SELECT * FROM ${qi(table)} WHERE ${where};`;
+}
+
 export function buildRowDelete(
   kind: DbKind,
   table: string,

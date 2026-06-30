@@ -12,7 +12,7 @@ import {
 } from "./api";
 import { OpenTab, useStore } from "./store";
 import { toast, uiConfirm, uiPrompt, copyToClipboard, pickSaveFile, useModalCount, useModalOverlay } from "./ui";
-import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rectToMarkdown, rangeStats, buildInClause, buildInsertValues, TYPE_PRESETS } from "./sql";
+import { quoteIdent, qualifiedName, sqlLiteral, buildRowUpdate, buildRowDelete, buildRowSelect, buildAddForeignKey, buildDropForeignKey, buildRenameIndex, buildCreateFulltextIndex, parseClipboardGrid, rectToTsv, rectToMarkdown, rangeStats, buildInClause, buildInsertValues, TYPE_PRESETS } from "./sql";
 import ExportDialog from "./ExportDialog";
 import ImportDialog from "./ImportDialog";
 import RedisKeyTree from "./RedisKeyTree";
@@ -651,6 +651,12 @@ function DataPane({ tab }: { tab: OpenTab }) {
     const k = connKind ?? "mysql";
     copyToClipboard(buildRowDelete(k, tab.table, data.primary_key, pkValuesOf(r)), "已複製為 DELETE");
   };
+  // 定位此列的 SELECT（唯讀安全：不寫入，readonly 連線亦可用）。
+  const copyRowSelect = (r: number) => {
+    if (!data) return;
+    const k = connKind ?? "mysql";
+    copyToClipboard(buildRowSelect(k, tab.table, data.primary_key, pkValuesOf(r)), "已複製為 SELECT");
+  };
   const duplicateRow = (r: number) => {
     if (!data) return;
     const vals = rowValues(r);
@@ -702,6 +708,10 @@ function DataPane({ tab }: { tab: OpenTab }) {
       ["複製整列 (TSV)", () => copyRowTsv(r), false],
       // INSERT 範本僅對 SQL 資料庫有意義（Mongo 用 JSON）。
       ...(isSqlKind ? [["複製為 INSERT", () => copyRowInsert(r), false] as [string, () => void, boolean]] : []),
+      // SELECT（定位此列）：需主鍵但唯讀安全，唯讀連線也提供。
+      ...(isSqlKind && (data?.primary_key.length ?? 0) > 0
+        ? [["複製為 SELECT（定位此列）", () => copyRowSelect(r), false] as [string, () => void, boolean]]
+        : []),
       // UPDATE / DELETE 範本需主鍵定位。
       ...(isSqlKind && editable
         ? [

@@ -53,6 +53,7 @@ import {
   buildDropForeignKey,
   buildRowUpdate,
   buildRowDelete,
+  buildRowSelect,
   formatSql,
   resultToMarkdown,
   isSystemDatabase,
@@ -741,6 +742,10 @@ describe("table/database lifecycle DDL", () => {
     expect(buildRowDelete("postgres", "t", ["id"], ["5"])).toBe('DELETE FROM "t" WHERE "id" = \'5\';');
     // 複合主鍵以 AND 串接；NULL 值以 NULL 呈現。
     expect(buildRowDelete("mysql", "t", ["a", "b"], ["1", null])).toBe("DELETE FROM `t` WHERE `a` = '1' AND `b` = NULL;");
+  });
+  it("buildRowSelect: 定位此列的 SELECT（主鍵 WHERE、跨方言跳脫）", () => {
+    expect(buildRowSelect("mysql", "t", ["id"], ["5"])).toBe("SELECT * FROM `t` WHERE `id` = '5';");
+    expect(buildRowSelect("postgres", "t", ["a", "b"], ["1", "x'y"])).toBe('SELECT * FROM "t" WHERE "a" = \'1\' AND "b" = \'x\'\'y\';');
   });
 });
 
