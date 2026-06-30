@@ -3521,13 +3521,14 @@ function ResultTable({ result, onViewChange }: { result: QueryResult; onViewChan
                     if (!inRange(i, j)) { setSelected({ r: i, c: j }); setRangeEnd(null); }
                     setMenu({ r: i, c: j, x: e.clientX, y: e.clientY });
                   }}
-                  className={`px-3 py-1 border-b border-fg/5 align-top cursor-cell ${
+                  className={`px-3 py-1 border-b border-fg/5 align-middle cursor-cell ${
                     selected?.r === i && selected?.c === j ? "ring-1 ring-inset ring-accent " : ""
                   }${
                     selected?.r === i && selected?.c === j ? "bg-accent/15" : inRange(i, j) ? "bg-accent/10" : ""
                   }`}
                   title={c == null ? "NULL（雙擊檢視）" : c}>
-                  {c === null ? <span className="text-fg/30 italic">NULL</span> : c}
+                  {/* 單行截斷 + 上限寬度：長字串（Memo / RefTransId / JSON）不再換行撐爆列高；完整值看 title 提示、雙擊檢視、或點列號看整列。 */}
+                  {c === null ? <span className="text-fg/30 italic">NULL</span> : <div className="truncate max-w-[60ch]">{c}</div>}
                 </td>
               ))}
             </tr>
