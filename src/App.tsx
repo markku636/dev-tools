@@ -2432,6 +2432,8 @@ function QueryPane() {
         const had = sql.trim().length > 0;
         if (had) setHistory((h) => pushQueryHistory(h, sql));
         persistSql("");
+        // 開新查詢＝全新起點：一併清掉上一輪的結果 / 錯誤 / 耗時，結果區不殘留舊資料。
+        setResult(null); setResultView(null); setErr(null); setErrSql(null); setErrStmt(null); setElapsed(null);
         toast.success(had ? "已開新查詢（原內容已存入歷史）" : "已開新查詢");
         setTimeout(() => editorRef.current?.focus(), 0);
       } else {
