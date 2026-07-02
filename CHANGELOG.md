@@ -1,3 +1,8 @@
+## v0.2.4
+
+- 版本號 0.2.3 → 0.2.4（package.json / package-lock.json / tauri.conf.json / Cargo.toml / Cargo.lock 同步）；重打 Windows / macOS / Linux 安裝檔。
+- 修正：查詢結果列過多時撐爆版面（畫過狀態列）——QueryPane 根容器補 `min-h-0`，結果區改由內層 `overflow-auto` 正常捲動。
+
 ## v0.2.3
 
 - 版本號 0.2.2 → 0.2.3（package.json / tauri.conf.json / Cargo.toml / Cargo.lock 同步）；重打 Windows / macOS / Linux 安裝檔。修正 release 佈版：v0.2.2 標籤指向的是尚未同步 package-lock.json 的舊 commit，`npm ci` 在裝相依這步就失敗，故改以含 lockfile 修正的 commit 重切乾淨標籤發佈。
